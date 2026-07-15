@@ -1,9 +1,8 @@
 import { useState, useEffect } from "react";
-import { sget, sset, sdel, sgetCollection, sgetOne, ssetOne, supdateOne, sdelOne, authLogIn, authLogOut, onAuthChange } from "./firebase";
+import { sget, sset, sdel } from "./firebase";
 
 const G="#C9A84C",G2="#F0C96B",BG="#0F0F0F",CARD="#1A1A1A",CARD2="#222",BORDER="#2A2A2A",TXT="#F5F5F5",MUTED="#888",GREEN="#4CAF50",RED="#ef5350",BLUE="#4A90D9";
-// Only this exact email is treated as Admin — you created this account yourself in Firebase Console.
-const ADMIN_EMAIL="jaaiishah00123@gmail.com";
+const ADMIN_EMAIL="admin@mehendi.com",ADMIN_PASS="admin123";
 const COVERAGE=["One Hand","Both Hands","Half Arm","Full Arm"];
 const STYLES=["Arabic","Floral","Rajasthani","Geometric","Minimal","Glitter","Fusion","Bridal"];
 const OCCASIONS=["Wedding","Eid","Karwa Chauth","Teej","Birthday","Party","Other"];
@@ -167,6 +166,46 @@ function ArtistModal({artist,onClose,onApprove,onReject}){
   );
 }
 
+function ReviewModal({booking,user,onSubmit,onClose}){
+  const [rating,setRating]=useState(0);
+  const [review,setReview]=useState("");
+  const [saving,setSaving]=useState(false);
+  const submit=async()=>{
+    if(!rating){alert("Select a rating.");return;}
+    setSaving(true);
+    const reviews=await sget("reviews")||[];
+    const r={id:gid(),bookingId:booking.id,artistId:booking.artistId,customerId:user.id,customerName:user.name,rating,review,ts:new Date().toISOString()};
+    await sset("reviews",[...reviews,r]);
+    const artists=await sget("artists")||[];
+    const ar=[...reviews,r].filter(x=>x.artistId===booking.artistId);
+    const avg=Number((ar.reduce((s,x)=>s+x.rating,0)/ar.length).toFixed(1));
+    await sset("artists",artists.map(a=>a.id===booking.artistId?{...a,rating:avg,reviews:ar.length}:a));
+    const bookings=await sget("bookings")||[];
+    await sset("bookings",bookings.map(b=>b.id===booking.id?{...b,reviewed:true}:b));
+    setSaving(false);onSubmit();
+  };
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:999,padding:"1rem"}}>
+      <div style={{background:CARD,borderRadius:20,padding:"1.5rem",width:"100%",maxWidth:360,border:`1px solid ${BORDER}`}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1.25rem"}}>
+          <p style={{margin:0,fontWeight:700,fontSize:16}}>Rate your experience</p>
+          <button onClick={onClose} style={{background:"none",border:"none",color:MUTED,cursor:"pointer",fontSize:20}}>×</button>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:12,background:CARD2,borderRadius:12,padding:"12px",marginBottom:"1.25rem"}}>
+          <Av name={booking.artistName} size={44}/>
+          <div><p style={{margin:0,fontWeight:600}}>{booking.artistName}</p><p style={{margin:"2px 0 0",fontSize:12,color:MUTED}}>{booking.style} · {booking.coverage}</p></div>
+        </div>
+        <div style={{display:"flex",justifyContent:"center",marginBottom:"0.5rem"}}><Stars rating={rating} interactive onRate={setRating}/></div>
+        {rating>0&&<p style={{textAlign:"center",fontSize:12,color:G,marginBottom:"1rem"}}>{["","😞 Poor","😐 Fair","😊 Good","😄 Great","🤩 Excellent!"][rating]}</p>}
+        <div style={{marginBottom:"1.25rem"}}>
+          <label style={{display:"block",fontSize:12,color:MUTED,marginBottom:6}}>Write a review (optional)</label>
+          <textarea value={review} onChange={e=>setReview(e.target.value)} placeholder="Share your experience…" rows={3} style={{width:"100%",boxSizing:"border-box",background:CARD2,border:`1px solid ${BORDER}`,borderRadius:12,padding:"12px 14px",color:TXT,fontSize:13,outline:"none",resize:"none"}}/>
+        </div>
+        <Btn full disabled={!rating||saving} onClick={submit}>{saving?"Submitting…":"Submit Review →"}</Btn>
+      </div>
+    </div>
+  );
+}
 
 function ChatScreen({booking,currentUser,currentRole,onBack}){
   const [msgs,setMsgs]=useState([]);
@@ -218,36 +257,9 @@ function ChatScreen({booking,currentUser,currentRole,onBack}){
 // ── ADMIN APP ──────────────────────────────────────────────
 function AdminApp({onBack}){
   const [loggedIn,setLoggedIn]=useState(false);
-  const [authChecked,setAuthChecked]=useState(false);
   const [email,setEmail]=useState("");
   const [pass,setPass]=useState("");
   const [err,setErr]=useState("");
-
-  // Restore session automatically if the browser already has a valid admin login
-  useEffect(()=>{
-    const unsub=onAuthChange(fbUser=>{
-      setLoggedIn(!!fbUser && fbUser.email===ADMIN_EMAIL);
-      setAuthChecked(true);
-    });
-    return()=>unsub();
-  },[]);
-
-  const login=async()=>{
-    setErr("");
-    try{
-      const fbUser=await authLogIn(email,pass);
-      if(fbUser.email!==ADMIN_EMAIL){
-        await authLogOut();
-        setErr("This account is not authorized as Admin.");
-        return;
-      }
-      setLoggedIn(true);
-    }catch(e){
-      setErr("Invalid email or password.");
-    }
-  };
-
-  const logoutAdmin=async()=>{await authLogOut();setLoggedIn(false);};
   const [tab,setTab]=useState("artists");
   const [artists,setArtists]=useState([]);
   const [bookings,setBookings]=useState([]);
@@ -257,27 +269,27 @@ function AdminApp({onBack}){
   const [viewArtist,setViewArtist]=useState(null);
 
   const load=async()=>{
-    const a=await sgetCollection("artists");setArtists(a);
-    const b=await sgetCollection("bookings");setBookings(b);
-    const c=await sgetCollection("customers");setCustomers(c);
-    const r=await sgetCollection("reviews");setReviews(r);
+    const a=await sget("artists");setArtists(a||[]);
+    const b=await sget("bookings");setBookings(b||[]);
+    const c=await sget("customers");setCustomers(c||[]);
+    const r=await sget("reviews");setReviews(r||[]);
     setLastRefresh(new Date().toLocaleTimeString());
   };
   useEffect(()=>{ if(loggedIn){ load(); const t=setInterval(load,5000); return()=>clearInterval(t); } },[loggedIn]);
 
   const updateArtist=async(id,patch)=>{
-    setArtists(prev=>prev.map(a=>a.id===id?{...a,...patch}:a));
-    await supdateOne("artists",id,patch);
+    const updated=artists.map(a=>a.id===id?{...a,...patch}:a);
+    setArtists(updated);await sset("artists",updated);
   };
 
   if(!loggedIn) return (
     <div style={{background:BG,minHeight:"100vh",color:TXT,fontFamily:"system-ui,sans-serif"}}>
       <div style={{padding:"1rem"}}><button onClick={onBack} style={{background:"none",border:"none",color:MUTED,cursor:"pointer",fontSize:13}}>← Back</button></div>
       <AuthWrap icon="⚙️" title="Admin Login" subtitle="MehendiBook operations dashboard">
-        <Inp label="Email" type="email" placeholder="you@example.com" value={email} onChange={setEmail}/>
+        <Inp label="Email" type="email" placeholder="admin@mehendi.com" value={email} onChange={setEmail}/>
         <Inp label="Password" type="password" placeholder="••••••••" value={pass} onChange={setPass}/>
         {err&&<p style={{fontSize:12,color:RED,margin:"-4px 0 12px"}}>{err}</p>}
-        <Btn full onClick={login}>Sign In →</Btn>
+        <Btn full onClick={()=>{ if(email===ADMIN_EMAIL&&pass===ADMIN_PASS) setLoggedIn(true); else setErr("Invalid. Hint: admin@mehendi.com / admin123"); }}>Sign In →</Btn>
       </AuthWrap>
     </div>
   );
@@ -306,7 +318,7 @@ function AdminApp({onBack}){
           </div>
           <div style={{display:"flex",gap:8}}>
             <Btn small variant="ghost" onClick={load}>↻</Btn>
-            <Btn small variant="ghost" onClick={logoutAdmin}>Sign out</Btn>
+            <Btn small variant="ghost" onClick={()=>setLoggedIn(false)}>Sign out</Btn>
           </div>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>

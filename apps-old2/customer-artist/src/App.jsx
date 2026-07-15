@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { sget, sset, sdel, sgetCollection, sgetOne, ssetOne, supdateOne, sdelOne, authSignUp, authLogIn, authLogOut, authResetPassword, authSendEmailVerification, authReloadUser, onAuthChange } from "./firebase";
+import { sget, sset, sdel, sgetCollection, sgetOne, ssetOne, supdateOne, sdelOne, authSignUp, authLogIn, authLogOut, authResetPassword, onAuthChange } from "./firebase";
 
 const G="#C9A84C",G2="#F0C96B",BG="#0F0F0F",CARD="#1A1A1A",CARD2="#222",BORDER="#2A2A2A",TXT="#F5F5F5",MUTED="#888",GREEN="#4CAF50",RED="#ef5350",BLUE="#4A90D9";
 const COVERAGE=["One Hand","Both Hands","Half Arm","Full Arm"];
@@ -165,37 +165,6 @@ function ArtistModal({artist,onClose,onApprove,onReject}){
   );
 }
 
-function VerifyEmail({fbUser,onVerified,onBack}){
-  const [checking,setChecking]=useState(false);
-  const [resent,setResent]=useState(false);
-  const [err,setErr]=useState("");
-
-  const check=async()=>{
-    setChecking(true);setErr("");
-    const verified=await authReloadUser(fbUser);
-    setChecking(false);
-    if(verified) onVerified();
-    else setErr("Not verified yet — check your inbox (and spam folder).");
-  };
-
-  const resend=async()=>{
-    try{await authSendEmailVerification(fbUser);setResent(true);}
-    catch{setErr("Could not resend right now. Try again in a moment.");}
-  };
-
-  return (
-    <div style={{maxWidth:400,margin:"0 auto",padding:"2rem 1rem",textAlign:"center"}}>
-      <div style={{fontSize:44,marginBottom:"1rem"}}>📧</div>
-      <h2 style={{color:TXT,fontSize:19,fontWeight:700,margin:"0 0 8px"}}>Verify your email</h2>
-      <p style={{fontSize:13,color:MUTED,margin:"0 0 1.5rem",lineHeight:1.6}}>We sent a confirmation link to<br/><strong style={{color:TXT}}>{fbUser.email}</strong><br/>Click it, then come back and tap below.</p>
-      {err&&<p style={{fontSize:12,color:RED,margin:"0 0 12px"}}>{err}</p>}
-      <Btn full disabled={checking} onClick={check}>{checking?"Checking…":"I've verified — Continue →"}</Btn>
-      <p style={{marginTop:"1rem"}}><button onClick={resend} style={{background:"none",border:"none",color:G,fontSize:13,cursor:"pointer"}}>{resent?"Email resent ✓":"Resend email"}</button></p>
-      {onBack&&<p style={{marginTop:"0.5rem"}}><button onClick={onBack} style={{background:"none",border:"none",color:MUTED,fontSize:13,cursor:"pointer"}}>← Back</button></p>}
-    </div>
-  );
-}
-
 function ReviewModal({booking,user,onSubmit,onClose}){
   const [rating,setRating]=useState(0);
   const [review,setReview]=useState("");
@@ -291,8 +260,6 @@ function ChatScreen({booking,currentUser,currentRole,onBack}){
 // ── CUSTOMER APP ───────────────────────────────────────────
 function CustomerApp({onBack}){
   const [user,setUser]=useState(null);
-  const [fbUser,setFbUser]=useState(null);
-  const [emailVerified,setEmailVerified]=useState(true);
   const [screen,setScreen]=useState("home");
   const [artists,setArtists]=useState([]);
   const [artist,setArtist]=useState(null);
@@ -312,11 +279,9 @@ function CustomerApp({onBack}){
 
   // Restore session automatically if the browser already has a Firebase login
   useEffect(()=>{
-    const unsub=onAuthChange(async(fu)=>{
-      setFbUser(fu);
-      if(fu){
-        setEmailVerified(fu.emailVerified);
-        const found=await sgetOne("customers",fu.uid);
+    const unsub=onAuthChange(async(fbUser)=>{
+      if(fbUser){
+        const found=await sgetOne("customers",fbUser.uid);
         if(found)setUser(found);
       } else {
         setUser(null);
@@ -341,22 +306,19 @@ function CustomerApp({onBack}){
     setErrs(e);if(Object.keys(e).length)return;
     if(mode==="signup"){
       try{
-        const newFbUser=await authSignUp(form.email,form.password);
-        await authSendEmailVerification(newFbUser);
-        setFbUser(newFbUser);setEmailVerified(newFbUser.emailVerified);
+        const fbUser=await authSignUp(form.email,form.password);
         // id === Firebase Auth uid on purpose: every place downstream that stores
         // customerId (bookings, requests, reviews) automatically matches auth.uid,
         // which is what the security rules check for ownership.
-        const u={id:newFbUser.uid,name:form.name,email:form.email,phone:form.phone,createdAt:new Date().toISOString()};
-        await ssetOne("customers",newFbUser.uid,u);setUser(u);
+        const u={id:fbUser.uid,name:form.name,email:form.email,phone:form.phone,createdAt:new Date().toISOString()};
+        await ssetOne("customers",fbUser.uid,u);setUser(u);
       }catch(err){
         setAuthErr(err.code==="auth/email-already-in-use"?"Account already exists.":"Could not create account.");
       }
     } else {
       try{
-        const loggedInUser=await authLogIn(form.email,form.password);
-        setFbUser(loggedInUser);setEmailVerified(loggedInUser.emailVerified);
-        const found=await sgetOne("customers",loggedInUser.uid);
+        const fbUser=await authLogIn(form.email,form.password);
+        const found=await sgetOne("customers",fbUser.uid);
         if(!found){setAuthErr("No profile found for this account.");return;}
         setUser(found);
       }catch(err){
@@ -364,7 +326,6 @@ function CustomerApp({onBack}){
       }
     }
   };
-
 
   const signOutUser=async()=>{await authLogOut();setUser(null);};
 
@@ -390,13 +351,6 @@ function CustomerApp({onBack}){
         {mode==="login"&&<p style={{textAlign:"center",marginTop:"1rem"}}><button onClick={()=>{setMode("forgot");setErrs({});setAuthErr("");setResetSent(false);}} style={{background:"none",border:"none",color:G,fontSize:13,cursor:"pointer"}}>Forgot password?</button></p>}
         {mode==="forgot"&&<p style={{textAlign:"center",marginTop:"1rem"}}><button onClick={()=>{setMode("login");setErrs({});setAuthErr("");setResetSent(false);}} style={{background:"none",border:"none",color:MUTED,fontSize:13,cursor:"pointer"}}>← Back to sign in</button></p>}
       </AuthWrap>
-    </div>
-  );
-
-  if(!emailVerified) return (
-    <div style={{background:BG,minHeight:"100vh",color:TXT,fontFamily:"system-ui,sans-serif"}}>
-      <div style={{padding:"1rem"}}><button onClick={signOutUser} style={{background:"none",border:"none",color:MUTED,cursor:"pointer",fontSize:13}}>← Sign out</button></div>
-      <VerifyEmail fbUser={fbUser} onVerified={()=>setEmailVerified(true)}/>
     </div>
   );
 
@@ -794,8 +748,6 @@ function TrackingScreen({booking,user,onDone,onChat}){
 // ── ARTIST APP ─────────────────────────────────────────────
 function ArtistApp({onBack}){
   const [user,setUser]=useState(null);
-  const [fbUser,setFbUser]=useState(null);
-  const [emailVerified,setEmailVerified]=useState(true);
   const [mode,setMode]=useState("login");
   const [regStep,setRegStep]=useState(0);
   const [form,setForm]=useState({name:"",email:"",phone:"",password:"",bio:"",location:"",exp:"",tag:"",instagram:""});
@@ -825,11 +777,9 @@ function ArtistApp({onBack}){
 
   // Restore session automatically if the browser already has a Firebase login
   useEffect(()=>{
-    const unsub=onAuthChange(async(fu)=>{
-      setFbUser(fu);
-      if(fu){
-        setEmailVerified(fu.emailVerified);
-        const found=await sgetOne("artists",fu.uid);
+    const unsub=onAuthChange(async(fbUser)=>{
+      if(fbUser){
+        const found=await sgetOne("artists",fbUser.uid);
         if(found)setUser(found);
       } else {
         setUser(null);
@@ -837,32 +787,6 @@ function ArtistApp({onBack}){
     });
     return()=>unsub();
   },[]);
-
-  const [locStatus,setLocStatus]=useState("idle"); // idle | detecting | done | denied | error
-
-  const detectLocation=async()=>{
-    setLocStatus("detecting");
-    try{
-      const pos=await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,{timeout:8000,enableHighAccuracy:true}));
-      const{latitude,longitude}=pos.coords;
-      let label="";
-      try{
-        const r=await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`);
-        const d=await r.json();
-        const area=d.address?.suburb||d.address?.neighbourhood||"";
-        const city=d.address?.city||d.address?.town||"";
-        label=area&&city?`${area}, ${city}`:(city||`${latitude.toFixed(3)}, ${longitude.toFixed(3)}`);
-      }catch{ label=`${latitude.toFixed(3)}, ${longitude.toFixed(3)}`; }
-      setForm(f=>({...f,location:label,lat:latitude,lng:longitude}));
-      setLocStatus("done");
-    }catch(err){
-      setLocStatus(err.code===1?"denied":"error"); // code 1 = permission denied
-    }
-  };
-
-  // Auto-run as soon as they reach the profile step — no manual typing allowed,
-  // this is what keeps the displayed location honest and matching their real GPS.
-  useEffect(()=>{ if(regStep===1&&locStatus==="idle") detectLocation(); },[regStep]);
 
   const sf=(k,v)=>{setForm(f=>({...f,[k]:v}));setAuthErr("");};
   const toggleSty=s=>setStyles(p=>p.includes(s)?p.filter(x=>x!==s):[...p,s]);
@@ -876,9 +800,8 @@ function ArtistApp({onBack}){
     }
     if(mode==="login"){
       try{
-        const loggedInUser=await authLogIn(form.email,form.password);
-        setFbUser(loggedInUser);setEmailVerified(loggedInUser.emailVerified);
-        const found=await sgetOne("artists",loggedInUser.uid);
+        const fbUser=await authLogIn(form.email,form.password);
+        const found=await sgetOne("artists",fbUser.uid);
         if(!found){setAuthErr("No profile found for this account.");return;}
         setUser(found);
       }catch(err){
@@ -888,10 +811,8 @@ function ArtistApp({onBack}){
       // signup: create the Firebase Auth identity now, collect profile details in step 2
       if(form.password.length<6){setAuthErr("Password must be 6+ characters.");return;}
       try{
-        const newFbUser=await authSignUp(form.email,form.password);
-        await authSendEmailVerification(newFbUser);
-        setFbUser(newFbUser);setEmailVerified(newFbUser.emailVerified);
-        setPendingUid(newFbUser.uid);
+        const fbUser=await authSignUp(form.email,form.password);
+        setPendingUid(fbUser.uid);
         setRegStep(1);
       }catch(err){
         setAuthErr(err.code==="auth/email-already-in-use"?"Account already exists.":"Could not create account.");
@@ -901,10 +822,11 @@ function ArtistApp({onBack}){
 
   const register=async()=>{
     if(!form.name||!form.email||!form.location||!form.exp||!styles.length){setAuthErr("Fill all required fields.");return;}
-    if(locStatus!=="done"||form.lat==null||form.lng==null){setAuthErr("Please allow location access so customers can find you nearby.");return;}
+    let lat=null,lng=null;
+    try{await new Promise(res=>navigator.geolocation.getCurrentPosition(({coords})=>{lat=coords.latitude;lng=coords.longitude;res();},()=>res(),{timeout:6000}));}catch{}
     const{password,...formNoPassword}=form; // never store the password in the database — Firebase Auth already holds it securely
     // id === Firebase Auth uid on purpose — matches ownership rules for bookings/requests/reviews downstream.
-    const artist={id:pendingUid,...formNoPassword,styles,pricing,blockedDates:[],status:"pending",online:false,bookings:0,rating:0,reviews:0,createdAt:new Date().toISOString()};
+    const artist={id:pendingUid,...formNoPassword,styles,pricing,blockedDates:[],status:"pending",online:false,bookings:0,rating:0,reviews:0,lat,lng,createdAt:new Date().toISOString()};
     await ssetOne("artists",pendingUid,artist);setUser(artist);
   };
 
@@ -963,22 +885,7 @@ function ArtistApp({onBack}){
           <h2 style={{color:G,margin:"0 0 1.5rem",fontSize:18}}>Complete your profile</h2>
           <Inp label="Full name *" placeholder="Priya Sharma" value={form.name} onChange={v=>sf("name",v)}/>
           <Inp label="Phone *" type="tel" placeholder="9876543210" value={form.phone} onChange={v=>sf("phone",v)}/>
-          <div style={{marginBottom:"0.9rem"}}>
-            <label style={{display:"block",fontSize:12,color:MUTED,marginBottom:5}}>Location *</label>
-            {locStatus==="detecting"&&<p style={{fontSize:13,color:MUTED,margin:0}}>📍 Detecting your location…</p>}
-            {locStatus==="done"&&<div style={{background:CARD2,border:`1px solid ${BORDER}`,borderRadius:12,padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <span style={{fontSize:14,color:TXT}}>📍 {form.location}</span>
-              <button onClick={detectLocation} style={{background:"none",border:"none",color:G,fontSize:12,cursor:"pointer"}}>Refresh</button>
-            </div>}
-            {locStatus==="denied"&&<div>
-              <p style={{fontSize:12,color:RED,margin:"0 0 6px"}}>Location access was blocked. We need this so customers can find you nearby — please enable location permission for this site in your browser settings, then retry.</p>
-              <button onClick={detectLocation} style={{background:"none",border:`1px solid ${G}`,color:G,borderRadius:8,padding:"6px 12px",fontSize:12,cursor:"pointer"}}>Try again</button>
-            </div>}
-            {locStatus==="error"&&<div>
-              <p style={{fontSize:12,color:RED,margin:"0 0 6px"}}>Couldn't detect your location. Check your connection and try again.</p>
-              <button onClick={detectLocation} style={{background:"none",border:`1px solid ${G}`,color:G,borderRadius:8,padding:"6px 12px",fontSize:12,cursor:"pointer"}}>Try again</button>
-            </div>}
-          </div>
+          <Inp label="Location *" placeholder="Lajpat Nagar, Delhi" value={form.location} onChange={v=>sf("location",v)}/>
           <Inp label="Tagline" placeholder="Bridal Specialist" value={form.tag} onChange={v=>sf("tag",v)}/>
           <Inp label="Bio" placeholder="Tell customers about yourself…" value={form.bio} onChange={v=>sf("bio",v)}/>
           <Inp label="Experience *" placeholder="5 years" value={form.exp} onChange={v=>sf("exp",v)}/>
@@ -992,13 +899,6 @@ function ArtistApp({onBack}){
           <Btn full onClick={register}>Submit for Approval →</Btn>
         </div>
       )}
-    </div>
-  );
-
-  if(!emailVerified) return (
-    <div style={{background:BG,minHeight:"100vh",color:TXT,fontFamily:"system-ui,sans-serif"}}>
-      <div style={{padding:"1rem"}}><button onClick={signOutUser} style={{background:"none",border:"none",color:MUTED,cursor:"pointer",fontSize:13}}>← Sign out</button></div>
-      <VerifyEmail fbUser={fbUser} onVerified={()=>setEmailVerified(true)}/>
     </div>
   );
 

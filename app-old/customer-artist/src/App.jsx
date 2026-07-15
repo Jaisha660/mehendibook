@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
-import { sget, sset, sdel, sgetCollection, sgetOne, ssetOne, supdateOne, sdelOne, authSignUp, authLogIn, authLogOut, authResetPassword, authSendEmailVerification, authReloadUser, onAuthChange } from "./firebase";
+import { sget, sset, sdel } from "./firebase";
 
 const G="#C9A84C",G2="#F0C96B",BG="#0F0F0F",CARD="#1A1A1A",CARD2="#222",BORDER="#2A2A2A",TXT="#F5F5F5",MUTED="#888",GREEN="#4CAF50",RED="#ef5350",BLUE="#4A90D9";
+const ADMIN_EMAIL="admin@mehendi.com",ADMIN_PASS="admin123";
 const COVERAGE=["One Hand","Both Hands","Half Arm","Full Arm"];
 const STYLES=["Arabic","Floral","Rajasthani","Geometric","Minimal","Glitter","Fusion","Bridal"];
 const OCCASIONS=["Wedding","Eid","Karwa Chauth","Teej","Birthday","Party","Other"];
@@ -165,37 +166,6 @@ function ArtistModal({artist,onClose,onApprove,onReject}){
   );
 }
 
-function VerifyEmail({fbUser,onVerified,onBack}){
-  const [checking,setChecking]=useState(false);
-  const [resent,setResent]=useState(false);
-  const [err,setErr]=useState("");
-
-  const check=async()=>{
-    setChecking(true);setErr("");
-    const verified=await authReloadUser(fbUser);
-    setChecking(false);
-    if(verified) onVerified();
-    else setErr("Not verified yet — check your inbox (and spam folder).");
-  };
-
-  const resend=async()=>{
-    try{await authSendEmailVerification(fbUser);setResent(true);}
-    catch{setErr("Could not resend right now. Try again in a moment.");}
-  };
-
-  return (
-    <div style={{maxWidth:400,margin:"0 auto",padding:"2rem 1rem",textAlign:"center"}}>
-      <div style={{fontSize:44,marginBottom:"1rem"}}>📧</div>
-      <h2 style={{color:TXT,fontSize:19,fontWeight:700,margin:"0 0 8px"}}>Verify your email</h2>
-      <p style={{fontSize:13,color:MUTED,margin:"0 0 1.5rem",lineHeight:1.6}}>We sent a confirmation link to<br/><strong style={{color:TXT}}>{fbUser.email}</strong><br/>Click it, then come back and tap below.</p>
-      {err&&<p style={{fontSize:12,color:RED,margin:"0 0 12px"}}>{err}</p>}
-      <Btn full disabled={checking} onClick={check}>{checking?"Checking…":"I've verified — Continue →"}</Btn>
-      <p style={{marginTop:"1rem"}}><button onClick={resend} style={{background:"none",border:"none",color:G,fontSize:13,cursor:"pointer"}}>{resent?"Email resent ✓":"Resend email"}</button></p>
-      {onBack&&<p style={{marginTop:"0.5rem"}}><button onClick={onBack} style={{background:"none",border:"none",color:MUTED,fontSize:13,cursor:"pointer"}}>← Back</button></p>}
-    </div>
-  );
-}
-
 function ReviewModal({booking,user,onSubmit,onClose}){
   const [rating,setRating]=useState(0);
   const [review,setReview]=useState("");
@@ -203,14 +173,15 @@ function ReviewModal({booking,user,onSubmit,onClose}){
   const submit=async()=>{
     if(!rating){alert("Select a rating.");return;}
     setSaving(true);
-    const rid=gid();
-    const r={id:rid,bookingId:booking.id,artistId:booking.artistId,customerId:user.id,customerName:user.name,rating,review,ts:new Date().toISOString()};
-    await ssetOne("reviews",rid,r);
-    const allReviews=await sgetCollection("reviews");
-    const ar=[...allReviews.filter(x=>x.artistId===booking.artistId),r];
+    const reviews=await sget("reviews")||[];
+    const r={id:gid(),bookingId:booking.id,artistId:booking.artistId,customerId:user.id,customerName:user.name,rating,review,ts:new Date().toISOString()};
+    await sset("reviews",[...reviews,r]);
+    const artists=await sget("artists")||[];
+    const ar=[...reviews,r].filter(x=>x.artistId===booking.artistId);
     const avg=Number((ar.reduce((s,x)=>s+x.rating,0)/ar.length).toFixed(1));
-    await supdateOne("artists",booking.artistId,{rating:avg,reviews:ar.length});
-    await supdateOne("bookings",booking.id,{reviewed:true});
+    await sset("artists",artists.map(a=>a.id===booking.artistId?{...a,rating:avg,reviews:ar.length}:a));
+    const bookings=await sget("bookings")||[];
+    await sset("bookings",bookings.map(b=>b.id===booking.id?{...b,reviewed:true}:b));
     setSaving(false);onSubmit();
   };
   return (
@@ -241,19 +212,14 @@ function ChatScreen({booking,currentUser,currentRole,onBack}){
   const [text,setText]=useState("");
   const key=`chats/${booking.id}`;
   useEffect(()=>{
-    const load=async()=>{
-      const m=await sget(key);
-      const list=m?Object.values(m):[];
-      list.sort((a,b)=>new Date(a.ts)-new Date(b.ts));
-      setMsgs(list);
-    };
+    const load=async()=>{const m=await sget(key)||[];setMsgs(m);};
     load();const t=setInterval(load,3000);return()=>clearInterval(t);
   },[booking.id]);
   const send=async()=>{
     if(!text.trim())return;
-    const mid=gid();
-    const msg={id:mid,text:text.trim(),sender:currentRole,senderName:currentUser.name,ts:new Date().toISOString()};
-    await supdateOne(key,mid,msg);
+    const msg={id:gid(),text:text.trim(),sender:currentRole,senderName:currentUser.name,ts:new Date().toISOString()};
+    const m=await sget(key)||[];
+    await sset(key,[...m,msg]);
     setMsgs(p=>[...p,msg]);setText("");
   };
   const other=currentRole==="customer"?booking.artistName:booking.customerName;
@@ -291,8 +257,6 @@ function ChatScreen({booking,currentUser,currentRole,onBack}){
 // ── CUSTOMER APP ───────────────────────────────────────────
 function CustomerApp({onBack}){
   const [user,setUser]=useState(null);
-  const [fbUser,setFbUser]=useState(null);
-  const [emailVerified,setEmailVerified]=useState(true);
   const [screen,setScreen]=useState("home");
   const [artists,setArtists]=useState([]);
   const [artist,setArtist]=useState(null);
@@ -302,101 +266,53 @@ function CustomerApp({onBack}){
   const [form,setForm]=useState({name:"",email:"",phone:"",password:""});
   const [errs,setErrs]=useState({});
   const [authErr,setAuthErr]=useState("");
-  const [resetSent,setResetSent]=useState(false);
   const [reviewBk,setReviewBk]=useState(null);
 
   useEffect(()=>{
-    const load=async()=>{const a=await sgetCollection("artists");setArtists(a.filter(x=>x.status==="approved"));};
+    const load=async()=>{const a=await sget("artists")||[];setArtists(a.filter(x=>x.status==="approved"));};
     load();const t=setInterval(load,5000);return()=>clearInterval(t);
-  },[]);
-
-  // Restore session automatically if the browser already has a Firebase login
-  useEffect(()=>{
-    const unsub=onAuthChange(async(fu)=>{
-      setFbUser(fu);
-      if(fu){
-        setEmailVerified(fu.emailVerified);
-        const found=await sgetOne("customers",fu.uid);
-        if(found)setUser(found);
-      } else {
-        setUser(null);
-      }
-    });
-    return()=>unsub();
   },[]);
 
   const sf=(k,v)=>{setForm(f=>({...f,[k]:v}));setErrs(e=>({...e,[k]:""}));setAuthErr("");};
 
   const auth=async()=>{
-    if(mode==="forgot"){
-      if(!/\S+@\S+\.\S+/.test(form.email)){setAuthErr("Enter a valid email.");return;}
-      try{await authResetPassword(form.email);setResetSent(true);setAuthErr("");}
-      catch(err){setAuthErr("Could not send reset email. Check the address.");}
-      return;
-    }
+    if(mode==="forgot"){const c=await sget("customers")||[];if(!c.find(x=>x.email===form.email)){setAuthErr("No account found.");return;}setAuthErr("");setMode("reset");return;}
+    if(mode==="reset"){if(form.password.length<6){setErrs(e=>({...e,password:"Min 6 chars"}));return;}const c=await sget("customers")||[];await sset("customers",c.map(x=>x.email===form.email?{...x,password:form.password}:x));setAuthErr("");setMode("login");setForm(f=>({...f,password:""}));return;}
     const e={};
     if(mode==="signup"){if(!form.name.trim())e.name="Required";if(!/^\d{10}$/.test(form.phone))e.phone="10 digits";}
     if(!/\S+@\S+\.\S+/.test(form.email))e.email="Valid email";
     if(form.password.length<6)e.password="Min 6 chars";
     setErrs(e);if(Object.keys(e).length)return;
+    const cs=await sget("customers")||[];
     if(mode==="signup"){
-      try{
-        const newFbUser=await authSignUp(form.email,form.password);
-        await authSendEmailVerification(newFbUser);
-        setFbUser(newFbUser);setEmailVerified(newFbUser.emailVerified);
-        // id === Firebase Auth uid on purpose: every place downstream that stores
-        // customerId (bookings, requests, reviews) automatically matches auth.uid,
-        // which is what the security rules check for ownership.
-        const u={id:newFbUser.uid,name:form.name,email:form.email,phone:form.phone,createdAt:new Date().toISOString()};
-        await ssetOne("customers",newFbUser.uid,u);setUser(u);
-      }catch(err){
-        setAuthErr(err.code==="auth/email-already-in-use"?"Account already exists.":"Could not create account.");
-      }
+      if(cs.find(c=>c.email===form.email)){setAuthErr("Account exists.");return;}
+      const u={id:gid(),name:form.name,email:form.email,phone:form.phone,password:form.password,createdAt:new Date().toISOString()};
+      await sset("customers",[...cs,u]);setUser(u);
     } else {
-      try{
-        const loggedInUser=await authLogIn(form.email,form.password);
-        setFbUser(loggedInUser);setEmailVerified(loggedInUser.emailVerified);
-        const found=await sgetOne("customers",loggedInUser.uid);
-        if(!found){setAuthErr("No profile found for this account.");return;}
-        setUser(found);
-      }catch(err){
-        setAuthErr("Invalid email or password.");
-      }
+      const found=cs.find(c=>c.email===form.email&&c.password===form.password);
+      if(!found){setAuthErr("Invalid email or password.");return;}
+      setUser(found);
     }
   };
-
-
-  const signOutUser=async()=>{await authLogOut();setUser(null);};
 
   if(!user) return (
     <div style={{background:BG,minHeight:"100vh",color:TXT,fontFamily:"system-ui,sans-serif"}}>
       <div style={{padding:"1rem"}}><button onClick={onBack} style={{background:"none",border:"none",color:MUTED,cursor:"pointer",fontSize:13}}>← Back</button></div>
-      <AuthWrap icon="👤" title={mode==="login"?"Welcome back":mode==="signup"?"Create account":"Forgot Password"} subtitle={mode==="login"?"Sign in to book artists":mode==="signup"?"Join MehendiBook":"We'll email you a reset link"}>
+      <AuthWrap icon="👤" title={mode==="login"?"Welcome back":mode==="signup"?"Create account":mode==="forgot"?"Forgot Password":"Reset Password"} subtitle={mode==="login"?"Sign in to book artists":mode==="signup"?"Join MehendiBook":mode==="forgot"?"Enter your email":"Enter new password"}>
         {(mode==="login"||mode==="signup")&&(
           <div style={{display:"flex",background:CARD2,borderRadius:10,padding:4,marginBottom:"1.25rem"}}>
-            {["login","signup"].map(m=><button key={m} onClick={()=>{setMode(m);setErrs({});setAuthErr("");setResetSent(false);}} style={{flex:1,padding:"8px 0",borderRadius:8,border:"none",cursor:"pointer",fontSize:13,fontWeight:500,background:mode===m?G:"transparent",color:mode===m?"#000":MUTED}}>{m==="login"?"Sign In":"Sign Up"}</button>)}
+            {["login","signup"].map(m=><button key={m} onClick={()=>{setMode(m);setErrs({});setAuthErr("");}} style={{flex:1,padding:"8px 0",borderRadius:8,border:"none",cursor:"pointer",fontSize:13,fontWeight:500,background:mode===m?G:"transparent",color:mode===m?"#000":MUTED}}>{m==="login"?"Sign In":"Sign Up"}</button>)}
           </div>
         )}
         {mode==="signup"&&<Inp label="Full name" placeholder="Riya Sharma" value={form.name} onChange={v=>sf("name",v)} error={errs.name}/>}
         <Inp label="Email" type="email" placeholder="riya@example.com" value={form.email} onChange={v=>sf("email",v)} error={errs.email}/>
         {mode==="signup"&&<Inp label="Phone" type="tel" placeholder="9876543210" value={form.phone} onChange={v=>sf("phone",v)} error={errs.phone}/>}
-        {(mode==="login"||mode==="signup")&&<Inp label="Password" type="password" placeholder="Min 6 characters" value={form.password} onChange={v=>sf("password",v)} error={errs.password}/>}
+        {(mode==="login"||mode==="signup"||mode==="reset")&&<Inp label={mode==="reset"?"New password":"Password"} type="password" placeholder="Min 6 characters" value={form.password} onChange={v=>sf("password",v)} error={errs.password}/>}
         {authErr&&<p style={{fontSize:12,color:RED,margin:"-4px 0 12px"}}>{authErr}</p>}
-        {mode==="forgot"&&resetSent?(
-          <p style={{fontSize:13,color:GREEN,margin:"0 0 1rem"}}>✓ Reset email sent — check your inbox.</p>
-        ):(
-          <Btn full onClick={auth}>{mode==="login"?"Sign In →":mode==="signup"?"Create Account →":"Send Reset Email →"}</Btn>
-        )}
-        {mode==="login"&&<p style={{textAlign:"center",marginTop:"1rem"}}><button onClick={()=>{setMode("forgot");setErrs({});setAuthErr("");setResetSent(false);}} style={{background:"none",border:"none",color:G,fontSize:13,cursor:"pointer"}}>Forgot password?</button></p>}
-        {mode==="forgot"&&<p style={{textAlign:"center",marginTop:"1rem"}}><button onClick={()=>{setMode("login");setErrs({});setAuthErr("");setResetSent(false);}} style={{background:"none",border:"none",color:MUTED,fontSize:13,cursor:"pointer"}}>← Back to sign in</button></p>}
+        <Btn full onClick={auth}>{mode==="login"?"Sign In →":mode==="signup"?"Create Account →":mode==="forgot"?"Continue →":"Reset Password →"}</Btn>
+        {mode==="login"&&<p style={{textAlign:"center",marginTop:"1rem"}}><button onClick={()=>{setMode("forgot");setErrs({});setAuthErr("");}} style={{background:"none",border:"none",color:G,fontSize:13,cursor:"pointer"}}>Forgot password?</button></p>}
+        {(mode==="forgot"||mode==="reset")&&<p style={{textAlign:"center",marginTop:"1rem"}}><button onClick={()=>{setMode("login");setErrs({});setAuthErr("");}} style={{background:"none",border:"none",color:MUTED,fontSize:13,cursor:"pointer"}}>← Back to sign in</button></p>}
       </AuthWrap>
-    </div>
-  );
-
-  if(!emailVerified) return (
-    <div style={{background:BG,minHeight:"100vh",color:TXT,fontFamily:"system-ui,sans-serif"}}>
-      <div style={{padding:"1rem"}}><button onClick={signOutUser} style={{background:"none",border:"none",color:MUTED,cursor:"pointer",fontSize:13}}>← Sign out</button></div>
-      <VerifyEmail fbUser={fbUser} onVerified={()=>setEmailVerified(true)}/>
     </div>
   );
 
@@ -405,7 +321,7 @@ function CustomerApp({onBack}){
   if(screen==="booking"&&artist) return <BookingFlow artist={artist} user={user} onConfirm={b=>{setBooking(b);setScreen("tracking");}} onBack={()=>setScreen("profile")}/>;
   if(screen==="tracking"&&booking) return <TrackingScreen booking={booking} user={user} onDone={()=>{setScreen("home");setBooking(null);setArtist(null);}} onChat={b=>setChatBk(b)}/>;
 
-  return <CHome artists={artists} user={user} onArtist={a=>{setArtist(a);setScreen("profile");}} onSignOut={signOutUser} onChat={b=>setChatBk(b)} reviewBk={reviewBk} onReview={setReviewBk}/>;
+  return <CHome artists={artists} user={user} onArtist={a=>{setArtist(a);setScreen("profile");}} onSignOut={()=>setUser(null)} onChat={b=>setChatBk(b)} reviewBk={reviewBk} onReview={setReviewBk}/>;
 }
 
 function CHome({artists,user,onArtist,onSignOut,onChat,reviewBk,onReview}){
@@ -414,8 +330,8 @@ function CHome({artists,user,onArtist,onSignOut,onChat,reviewBk,onReview}){
   const [myRvs,setMyRvs]=useState([]);
   useEffect(()=>{
     const load=async()=>{
-      const b=await sgetCollection("bookings");setMyBks(b.filter(x=>x.customerId===user.id));
-      const r=await sgetCollection("reviews");setMyRvs(r.filter(x=>x.customerId===user.id));
+      const b=await sget("bookings")||[];setMyBks(b.filter(x=>x.customerId===user.id));
+      const r=await sget("reviews")||[];setMyRvs(r.filter(x=>x.customerId===user.id));
     };
     load();const t=setInterval(load,5000);return()=>clearInterval(t);
   },[user.id]);
@@ -532,7 +448,7 @@ function BookingHistory({bookings,reviews,onChat,onReview}){
 function ArtistProfile({artist,onBook,onBack}){
   const [reviews,setReviews]=useState([]);
   const p=artist.pricing||DEF_PRICE;
-  useEffect(()=>{(async()=>{const r=await sgetCollection("reviews");setReviews(r.filter(x=>x.artistId===artist.id));})();},[artist.id]);
+  useEffect(()=>{(async()=>{const r=await sget("reviews")||[];setReviews(r.filter(x=>x.artistId===artist.id));})();},[artist.id]);
   return (
     <div style={{background:BG,minHeight:"100vh",color:TXT,fontFamily:"system-ui,sans-serif"}}>
       <div style={{background:`linear-gradient(180deg,#1a1200,${BG})`,padding:"1.5rem 1rem 1.5rem"}}>
@@ -613,10 +529,9 @@ function BookingFlow({artist,user,onConfirm,onBack}){
   const p=artist.pricing||DEF_PRICE;
   const confirm=async()=>{
     const fp=calcP(artist,style,cov,occ);
-    const bid=gid();
-    const b={id:bid,artistId:artist.id,artistName:artist.name,customerId:user.id,customerName:user.name,customerPhone:user.phone,style,coverage:cov,occasion:occ,date,time,address:addr,price:fp,status:"pending",trackStep:0,createdAt:new Date().toISOString()};
-    await ssetOne("bookings",bid,b);
-    await ssetOne("requests",bid,b);
+    const b={id:gid(),artistId:artist.id,artistName:artist.name,customerId:user.id,customerName:user.name,customerPhone:user.phone,style,coverage:cov,occasion:occ,date,time,address:addr,price:fp,status:"pending",trackStep:0,createdAt:new Date().toISOString()};
+    const bks=await sget("bookings")||[];await sset("bookings",[...bks,b]);
+    const rqs=await sget("requests")||[];await sset("requests",[...rqs,{...b}]);
     onConfirm(b);
   };
   return (
@@ -706,7 +621,7 @@ function TrackingScreen({booking,user,onDone,onChat}){
   const [showRv,setShowRv]=useState(false);
   const [done,setDone]=useState(false);
   useEffect(()=>{
-    const poll=async()=>{const live=await sgetOne("bookings",booking.id);if(live){setStatus(live.status);if(live.trackStep!=null)setTStep(live.trackStep);}};
+    const poll=async()=>{const bks=await sget("bookings")||[];const live=bks.find(b=>b.id===booking.id);if(live){setStatus(live.status);if(live.trackStep!=null)setTStep(live.trackStep);}};
     poll();const t=setInterval(poll,3000);return()=>clearInterval(t);
   },[booking.id]);
   const completed=tStep===TRACK.length-1;
@@ -794,8 +709,6 @@ function TrackingScreen({booking,user,onDone,onChat}){
 // ── ARTIST APP ─────────────────────────────────────────────
 function ArtistApp({onBack}){
   const [user,setUser]=useState(null);
-  const [fbUser,setFbUser]=useState(null);
-  const [emailVerified,setEmailVerified]=useState(true);
   const [mode,setMode]=useState("login");
   const [regStep,setRegStep]=useState(0);
   const [form,setForm]=useState({name:"",email:"",phone:"",password:"",bio:"",location:"",exp:"",tag:"",instagram:""});
@@ -814,123 +727,58 @@ function ArtistApp({onBack}){
     setOnline(user.online||false);
     setBlocked(user.blockedDates||[]);
     const load=async()=>{
-      const rqs=await sgetCollection("requests");setRequests(rqs.filter(r=>r.artistId===user.id&&r.status==="pending"));
-      const bks=await sgetCollection("bookings");setMyBks(bks.filter(b=>b.artistId===user.id));
+      const rqs=await sget("requests")||[];setRequests(rqs.filter(r=>r.artistId===user.id&&r.status==="pending"));
+      const bks=await sget("bookings")||[];setMyBks(bks.filter(b=>b.artistId===user.id));
     };
     load();const t=setInterval(load,4000);return()=>clearInterval(t);
   },[user]);
-
-  const [resetSent,setResetSent]=useState(false);
-  const [pendingUid,setPendingUid]=useState(null); // holds the Firebase uid between signup step 0 → profile step 1
-
-  // Restore session automatically if the browser already has a Firebase login
-  useEffect(()=>{
-    const unsub=onAuthChange(async(fu)=>{
-      setFbUser(fu);
-      if(fu){
-        setEmailVerified(fu.emailVerified);
-        const found=await sgetOne("artists",fu.uid);
-        if(found)setUser(found);
-      } else {
-        setUser(null);
-      }
-    });
-    return()=>unsub();
-  },[]);
-
-  const [locStatus,setLocStatus]=useState("idle"); // idle | detecting | done | denied | error
-
-  const detectLocation=async()=>{
-    setLocStatus("detecting");
-    try{
-      const pos=await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,{timeout:8000,enableHighAccuracy:true}));
-      const{latitude,longitude}=pos.coords;
-      let label="";
-      try{
-        const r=await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`);
-        const d=await r.json();
-        const area=d.address?.suburb||d.address?.neighbourhood||"";
-        const city=d.address?.city||d.address?.town||"";
-        label=area&&city?`${area}, ${city}`:(city||`${latitude.toFixed(3)}, ${longitude.toFixed(3)}`);
-      }catch{ label=`${latitude.toFixed(3)}, ${longitude.toFixed(3)}`; }
-      setForm(f=>({...f,location:label,lat:latitude,lng:longitude}));
-      setLocStatus("done");
-    }catch(err){
-      setLocStatus(err.code===1?"denied":"error"); // code 1 = permission denied
-    }
-  };
-
-  // Auto-run as soon as they reach the profile step — no manual typing allowed,
-  // this is what keeps the displayed location honest and matching their real GPS.
-  useEffect(()=>{ if(regStep===1&&locStatus==="idle") detectLocation(); },[regStep]);
 
   const sf=(k,v)=>{setForm(f=>({...f,[k]:v}));setAuthErr("");};
   const toggleSty=s=>setStyles(p=>p.includes(s)?p.filter(x=>x!==s):[...p,s]);
 
   const handleAuth=async()=>{
-    if(mode==="forgot"){
-      if(!/\S+@\S+\.\S+/.test(form.email)){setAuthErr("Enter a valid email.");return;}
-      try{await authResetPassword(form.email);setResetSent(true);setAuthErr("");}
-      catch(err){setAuthErr("Could not send reset email. Check the address.");}
-      return;
-    }
-    if(mode==="login"){
-      try{
-        const loggedInUser=await authLogIn(form.email,form.password);
-        setFbUser(loggedInUser);setEmailVerified(loggedInUser.emailVerified);
-        const found=await sgetOne("artists",loggedInUser.uid);
-        if(!found){setAuthErr("No profile found for this account.");return;}
-        setUser(found);
-      }catch(err){
-        setAuthErr("Invalid email or password.");
-      }
-    } else {
-      // signup: create the Firebase Auth identity now, collect profile details in step 2
-      if(form.password.length<6){setAuthErr("Password must be 6+ characters.");return;}
-      try{
-        const newFbUser=await authSignUp(form.email,form.password);
-        await authSendEmailVerification(newFbUser);
-        setFbUser(newFbUser);setEmailVerified(newFbUser.emailVerified);
-        setPendingUid(newFbUser.uid);
-        setRegStep(1);
-      }catch(err){
-        setAuthErr(err.code==="auth/email-already-in-use"?"Account already exists.":"Could not create account.");
-      }
-    }
+    if(mode==="forgot"){const a=await sget("artists")||[];if(!a.find(x=>x.email===form.email)){setAuthErr("No account found.");return;}setAuthErr("");setMode("reset");return;}
+    if(mode==="reset"){if(form.password.length<6){setAuthErr("Min 6 chars.");return;}const a=await sget("artists")||[];await sset("artists",a.map(x=>x.email===form.email?{...x,password:form.password}:x));setAuthErr("");setMode("login");setForm(f=>({...f,password:""}));return;}
+    if(mode==="login"){const a=await sget("artists")||[];const found=a.find(x=>x.email===form.email&&x.password===form.password);if(!found){setAuthErr("Invalid email or password.");return;}setUser(found);}
+    else setRegStep(1);
   };
 
   const register=async()=>{
-    if(!form.name||!form.email||!form.location||!form.exp||!styles.length){setAuthErr("Fill all required fields.");return;}
-    if(locStatus!=="done"||form.lat==null||form.lng==null){setAuthErr("Please allow location access so customers can find you nearby.");return;}
-    const{password,...formNoPassword}=form; // never store the password in the database — Firebase Auth already holds it securely
-    // id === Firebase Auth uid on purpose — matches ownership rules for bookings/requests/reviews downstream.
-    const artist={id:pendingUid,...formNoPassword,styles,pricing,blockedDates:[],status:"pending",online:false,bookings:0,rating:0,reviews:0,createdAt:new Date().toISOString()};
-    await ssetOne("artists",pendingUid,artist);setUser(artist);
+    if(!form.name||!form.email||!form.password||!form.location||!form.exp||!styles.length){setAuthErr("Fill all required fields.");return;}
+    const a=await sget("artists")||[];
+    if(a.find(x=>x.email===form.email)){setAuthErr("Email already registered.");return;}
+    let lat=null,lng=null;
+    try{await new Promise(res=>navigator.geolocation.getCurrentPosition(({coords})=>{lat=coords.latitude;lng=coords.longitude;res();},()=>res(),{timeout:6000}));}catch{}
+    const artist={id:gid(),...form,styles,pricing,blockedDates:[],status:"pending",online:false,bookings:0,rating:0,reviews:0,lat,lng,createdAt:new Date().toISOString()};
+    await sset("artists",[...a,artist]);setUser(artist);
   };
-
-  const signOutUser=async()=>{await authLogOut();setUser(null);};
 
   const toggleOnline=async()=>{
     const n=!online;setOnline(n);
-    await supdateOne("artists",user.id,{online:n});
+    const a=await sget("artists")||[];
+    await sset("artists",a.map(x=>x.id===user.id?{...x,online:n}:x));
     setUser(u=>({...u,online:n}));
   };
 
   const toggleDate=async(full)=>{
     const nb=blocked.includes(full)?blocked.filter(d=>d!==full):[...blocked,full];
     setBlocked(nb);
-    await supdateOne("artists",user.id,{blockedDates:nb});
+    const a=await sget("artists")||[];
+    await sset("artists",a.map(x=>x.id===user.id?{...x,blockedDates:nb}:x));
     setUser(u=>({...u,blockedDates:nb}));
   };
 
   const updateTrack=async(bk,ts)=>{
-    await supdateOne("bookings",bk.id,{trackStep:ts});
+    const bks=await sget("bookings")||[];
+    await sset("bookings",bks.map(b=>b.id===bk.id?{...b,trackStep:ts}:b));
     setMyBks(p=>p.map(b=>b.id===bk.id?{...b,trackStep:ts}:b));
   };
 
   const handleReq=async(req,action)=>{
-    await supdateOne("requests",req.id,{status:action});
-    await supdateOne("bookings",req.id,{status:action});
+    const rqs=await sget("requests")||[];
+    await sset("requests",rqs.map(r=>r.id===req.id?{...r,status:action}:r));
+    const bks=await sget("bookings")||[];
+    await sset("bookings",bks.map(b=>b.id===req.id?{...b,status:action}:b));
     setRequests(p=>p.filter(r=>r.id!==req.id));
   };
 
@@ -940,22 +788,18 @@ function ArtistApp({onBack}){
     <div style={{background:BG,minHeight:"100vh",color:TXT,fontFamily:"system-ui,sans-serif"}}>
       <div style={{padding:"1rem"}}><button onClick={onBack} style={{background:"none",border:"none",color:MUTED,cursor:"pointer",fontSize:13}}>← Back</button></div>
       {regStep===0&&(
-        <AuthWrap icon="👩‍🎨" title={mode==="login"?"Artist Sign In":mode==="signup"?"Register":"Forgot Password"} subtitle={mode==="login"?"Sign in to your account":mode==="signup"?"Join MehendiBook":"We'll email you a reset link"}>
+        <AuthWrap icon="👩‍🎨" title={mode==="login"?"Artist Sign In":mode==="signup"?"Register":mode==="forgot"?"Forgot Password":"Reset Password"} subtitle={mode==="login"?"Sign in to your account":mode==="signup"?"Join MehendiBook":mode==="forgot"?"Enter your email":"Set new password"}>
           {(mode==="login"||mode==="signup")&&(
             <div style={{display:"flex",background:CARD2,borderRadius:10,padding:4,marginBottom:"1.25rem"}}>
-              {["login","signup"].map(m=><button key={m} onClick={()=>{setMode(m);setAuthErr("");setResetSent(false);}} style={{flex:1,padding:"8px 0",borderRadius:8,border:"none",cursor:"pointer",fontSize:13,fontWeight:500,background:mode===m?G:"transparent",color:mode===m?"#000":MUTED}}>{m==="login"?"Sign In":"Register"}</button>)}
+              {["login","signup"].map(m=><button key={m} onClick={()=>{setMode(m);setAuthErr("");}} style={{flex:1,padding:"8px 0",borderRadius:8,border:"none",cursor:"pointer",fontSize:13,fontWeight:500,background:mode===m?G:"transparent",color:mode===m?"#000":MUTED}}>{m==="login"?"Sign In":"Register"}</button>)}
             </div>
           )}
           <Inp label="Email" type="email" placeholder="artist@example.com" value={form.email} onChange={v=>sf("email",v)}/>
-          {(mode==="login"||mode==="signup")&&<Inp label="Password" type="password" placeholder="Min 6 characters" value={form.password} onChange={v=>sf("password",v)}/>}
+          {(mode==="login"||mode==="signup"||mode==="reset")&&<Inp label={mode==="reset"?"New password":"Password"} type="password" placeholder="Min 6 characters" value={form.password} onChange={v=>sf("password",v)}/>}
           {authErr&&<p style={{fontSize:12,color:RED,margin:"-4px 0 12px"}}>{authErr}</p>}
-          {mode==="forgot"&&resetSent?(
-            <p style={{fontSize:13,color:GREEN,margin:"0 0 1rem"}}>✓ Reset email sent — check your inbox.</p>
-          ):(
-            <Btn full onClick={handleAuth}>{mode==="login"?"Sign In →":mode==="signup"?"Continue →":"Send Reset Email →"}</Btn>
-          )}
-          {mode==="login"&&<p style={{textAlign:"center",marginTop:"1rem"}}><button onClick={()=>{setMode("forgot");setAuthErr("");setResetSent(false);}} style={{background:"none",border:"none",color:G,fontSize:13,cursor:"pointer"}}>Forgot password?</button></p>}
-          {mode==="forgot"&&<p style={{textAlign:"center",marginTop:"1rem"}}><button onClick={()=>{setMode("login");setAuthErr("");setResetSent(false);}} style={{background:"none",border:"none",color:MUTED,fontSize:13,cursor:"pointer"}}>← Back</button></p>}
+          <Btn full onClick={handleAuth}>{mode==="login"?"Sign In →":mode==="signup"?"Continue →":mode==="forgot"?"Continue →":"Reset Password →"}</Btn>
+          {mode==="login"&&<p style={{textAlign:"center",marginTop:"1rem"}}><button onClick={()=>{setMode("forgot");setAuthErr("");}} style={{background:"none",border:"none",color:G,fontSize:13,cursor:"pointer"}}>Forgot password?</button></p>}
+          {(mode==="forgot"||mode==="reset")&&<p style={{textAlign:"center",marginTop:"1rem"}}><button onClick={()=>{setMode("login");setAuthErr("");}} style={{background:"none",border:"none",color:MUTED,fontSize:13,cursor:"pointer"}}>← Back</button></p>}
         </AuthWrap>
       )}
       {regStep===1&&(
@@ -963,22 +807,7 @@ function ArtistApp({onBack}){
           <h2 style={{color:G,margin:"0 0 1.5rem",fontSize:18}}>Complete your profile</h2>
           <Inp label="Full name *" placeholder="Priya Sharma" value={form.name} onChange={v=>sf("name",v)}/>
           <Inp label="Phone *" type="tel" placeholder="9876543210" value={form.phone} onChange={v=>sf("phone",v)}/>
-          <div style={{marginBottom:"0.9rem"}}>
-            <label style={{display:"block",fontSize:12,color:MUTED,marginBottom:5}}>Location *</label>
-            {locStatus==="detecting"&&<p style={{fontSize:13,color:MUTED,margin:0}}>📍 Detecting your location…</p>}
-            {locStatus==="done"&&<div style={{background:CARD2,border:`1px solid ${BORDER}`,borderRadius:12,padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <span style={{fontSize:14,color:TXT}}>📍 {form.location}</span>
-              <button onClick={detectLocation} style={{background:"none",border:"none",color:G,fontSize:12,cursor:"pointer"}}>Refresh</button>
-            </div>}
-            {locStatus==="denied"&&<div>
-              <p style={{fontSize:12,color:RED,margin:"0 0 6px"}}>Location access was blocked. We need this so customers can find you nearby — please enable location permission for this site in your browser settings, then retry.</p>
-              <button onClick={detectLocation} style={{background:"none",border:`1px solid ${G}`,color:G,borderRadius:8,padding:"6px 12px",fontSize:12,cursor:"pointer"}}>Try again</button>
-            </div>}
-            {locStatus==="error"&&<div>
-              <p style={{fontSize:12,color:RED,margin:"0 0 6px"}}>Couldn't detect your location. Check your connection and try again.</p>
-              <button onClick={detectLocation} style={{background:"none",border:`1px solid ${G}`,color:G,borderRadius:8,padding:"6px 12px",fontSize:12,cursor:"pointer"}}>Try again</button>
-            </div>}
-          </div>
+          <Inp label="Location *" placeholder="Lajpat Nagar, Delhi" value={form.location} onChange={v=>sf("location",v)}/>
           <Inp label="Tagline" placeholder="Bridal Specialist" value={form.tag} onChange={v=>sf("tag",v)}/>
           <Inp label="Bio" placeholder="Tell customers about yourself…" value={form.bio} onChange={v=>sf("bio",v)}/>
           <Inp label="Experience *" placeholder="5 years" value={form.exp} onChange={v=>sf("exp",v)}/>
@@ -995,13 +824,6 @@ function ArtistApp({onBack}){
     </div>
   );
 
-  if(!emailVerified) return (
-    <div style={{background:BG,minHeight:"100vh",color:TXT,fontFamily:"system-ui,sans-serif"}}>
-      <div style={{padding:"1rem"}}><button onClick={signOutUser} style={{background:"none",border:"none",color:MUTED,cursor:"pointer",fontSize:13}}>← Sign out</button></div>
-      <VerifyEmail fbUser={fbUser} onVerified={()=>setEmailVerified(true)}/>
-    </div>
-  );
-
   const allDates=getDates([]);
   return (
     <div style={{background:BG,minHeight:"100vh",color:TXT,fontFamily:"system-ui,sans-serif"}}>
@@ -1014,7 +836,7 @@ function ArtistApp({onBack}){
               <Bdg label={user.status==="approved"?(online?"Online":"Offline"):user.status} color={user.status==="approved"?(online?"online":"offline"):user.status}/>
             </div>
           </div>
-          <button onClick={signOutUser} style={{background:"none",border:"none",color:MUTED,cursor:"pointer",fontSize:12}}>Sign out</button>
+          <button onClick={()=>setUser(null)} style={{background:"none",border:"none",color:MUTED,cursor:"pointer",fontSize:12}}>Sign out</button>
         </div>
         {user.status==="pending"&&<div style={{background:G+"15",border:`1px solid ${G}44`,borderRadius:12,padding:"12px 14px",marginBottom:"1rem"}}><p style={{margin:0,fontSize:13,color:G}}>⏳ Your profile is under review.</p></div>}
         {user.status==="approved"&&(
@@ -1111,7 +933,8 @@ function ArtistApp({onBack}){
         )}
         {tab==="editprofile"&&(
           <EditProfile user={user} onSave={async updated=>{
-            await supdateOne("artists",user.id,updated);
+            const a=await sget("artists")||[];
+            await sset("artists",a.map(x=>x.id===user.id?{...x,...updated}:x));
             setUser(u=>({...u,...updated}));setTab("profile");
           }} onCancel={()=>setTab("profile")}/>
         )}

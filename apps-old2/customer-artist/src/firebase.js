@@ -7,7 +7,6 @@ import {
   signOut,
   onAuthStateChanged,
   sendPasswordResetEmail,
-  sendEmailVerification,
 } from "firebase/auth";
 
 // ✅ Replace these with YOUR Firebase config
@@ -107,24 +106,6 @@ export async function authLogOut() {
 
 export async function authResetPassword(email) {
   await sendPasswordResetEmail(auth, email);
-}
-
-// ── Email verification (NEW) ────────────────────────────────────
-// Sends the "click this link to verify your email" message. Fires right after signup.
-export async function authSendEmailVerification(user) {
-  await sendEmailVerification(user);
-}
-
-// Firebase only updates `user.emailVerified` locally after a reload — call this
-// when the user says "I've clicked the link" so the app can re-check live.
-export async function authReloadUser(user) {
-  await user.reload();
-  // reload() updates the local user.emailVerified flag, but the signed security
-  // token used by database rules is cached separately and won't reflect the
-  // change until forced — without this, writes right after verifying can be
-  // silently rejected because the token still says "unverified" underneath.
-  await user.getIdToken(true);
-  return user.emailVerified;
 }
 
 export function onAuthChange(callback) {
