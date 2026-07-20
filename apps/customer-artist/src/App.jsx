@@ -443,6 +443,11 @@ function FindArtists({artists,onArtist}){
   const [filter,setFilter]=useState("All");
   const [loc,setLoc]=useState("Detecting location…");
   const [coords,setCoords]=useState(null);
+  const [manualLoc,setManualLoc]=useState(null); // {lat,lng,label} when customer picks a different place, else null = use GPS
+  const [showLocSearch,setShowLocSearch]=useState(false);
+  const [locQuery,setLocQuery]=useState("");
+  const [locResults,setLocResults]=useState([]);
+  const [locSearching,setLocSearching]=useState(false);
   const R=50;
   useEffect(()=>{
     if(!navigator.geolocation){setLoc("New Delhi, India");return;}
@@ -452,12 +457,55 @@ function FindArtists({artists,onArtist}){
       catch{setLoc("New Delhi, India");}
     },()=>setLoc("New Delhi, India"),{timeout:8000});
   },[]);
-  const wd=artists.map(a=>{if(coords&&a.lat&&a.lng)return{...a,dist:haversine(coords.lat,coords.lng,a.lat,a.lng)};return{...a,dist:null};}).sort((a,b)=>{if(a.dist==null&&b.dist==null)return 0;if(a.dist==null)return 1;if(b.dist==null)return-1;return a.dist-b.dist;});
+
+  // Debounced search-as-you-type against real places, so whatever the customer
+  // picks is always a genuine location with real coordinates — never free text.
+  useEffect(()=>{
+    if(locQuery.trim().length<3){setLocResults([]);return;}
+    setLocSearching(true);
+    const t=setTimeout(async()=>{
+      try{
+        const r=await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(locQuery)}&format=json&addressdetails=1&countrycodes=in&limit=6`);
+        const d=await r.json();
+        setLocResults(d.map(x=>({label:x.display_name,lat:parseFloat(x.lat),lng:parseFloat(x.lon)})));
+      }catch{setLocResults([]);}
+      setLocSearching(false);
+    },400);
+    return()=>clearTimeout(t);
+  },[locQuery]);
+
+  const pickLoc=(r)=>{
+    setManualLoc({lat:r.lat,lng:r.lng,label:r.label.split(",").slice(0,2).join(",")});
+    setShowLocSearch(false);setLocQuery("");setLocResults([]);
+  };
+  const useMyLocation=()=>{setManualLoc(null);setShowLocSearch(false);setLocQuery("");setLocResults([]);};
+
+  const activeCoords=manualLoc||coords;
+  const activeLoc=manualLoc?manualLoc.label:loc;
+
+  const wd=artists.map(a=>{if(activeCoords&&a.lat&&a.lng)return{...a,dist:haversine(activeCoords.lat,activeCoords.lng,a.lat,a.lng)};return{...a,dist:null};}).sort((a,b)=>{if(a.dist==null&&b.dist==null)return 0;if(a.dist==null)return 1;if(b.dist==null)return-1;return a.dist-b.dist;});
   const filtered=wd.filter(a=>(filter==="All"||a.styles?.includes(filter))&&(a.name.toLowerCase().includes(search.toLowerCase())||(a.tag||"").toLowerCase().includes(search.toLowerCase()))&&(a.dist==null||a.dist<=R));
   return (
     <div>
       <div style={{padding:"0.75rem 1rem 0",background:`linear-gradient(180deg,#1a1200,${BG})`}}>
-        <p style={{margin:"0 0 0.5rem",fontSize:12,color:G}}>📍 {loc}</p>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"0.5rem",flexWrap:"wrap"}}>
+          <p style={{margin:0,fontSize:12,color:G}}>📍 {activeLoc}</p>
+          <button onClick={()=>setShowLocSearch(s=>!s)} style={{background:"none",border:"none",color:MUTED,fontSize:11,textDecoration:"underline",cursor:"pointer",padding:0}}>Change</button>
+          {manualLoc&&<button onClick={useMyLocation} style={{background:"none",border:"none",color:MUTED,fontSize:11,textDecoration:"underline",cursor:"pointer",padding:0}}>Use my location</button>}
+        </div>
+        {showLocSearch&&(
+          <div style={{marginBottom:"0.75rem"}}>
+            <input value={locQuery} onChange={e=>setLocQuery(e.target.value)} placeholder="Search any city or area, e.g. Srinagar, Kashmir" autoFocus style={{width:"100%",boxSizing:"border-box",background:CARD2,border:`1px solid ${BORDER}`,borderRadius:12,padding:"10px 14px",color:TXT,fontSize:13,outline:"none"}}/>
+            {locSearching&&<p style={{fontSize:12,color:MUTED,margin:"6px 0 0"}}>Searching…</p>}
+            {locResults.length>0&&(
+              <div style={{background:CARD,border:`1px solid ${BORDER}`,borderRadius:12,marginTop:6,overflow:"hidden"}}>
+                {locResults.map((r,i)=>(
+                  <div key={i} onClick={()=>pickLoc(r)} style={{padding:"10px 14px",fontSize:13,color:TXT,cursor:"pointer",borderBottom:i<locResults.length-1?`1px solid ${BORDER}`:"none"}}>{r.label}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         <div style={{background:CARD2,borderRadius:14,border:`1px solid ${BORDER}`,padding:"11px 14px",display:"flex",alignItems:"center",gap:10,marginBottom:"0.75rem"}}>
           <span style={{opacity:0.5}}>🔍</span>
           <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search artists, styles…" style={{background:"none",border:"none",outline:"none",color:TXT,fontSize:14,flex:1}}/>
@@ -467,7 +515,7 @@ function FindArtists({artists,onArtist}){
         </div>
       </div>
       <div style={{padding:"0 1rem 2rem"}}>
-        <p style={{color:MUTED,fontSize:13,margin:"0.75rem 0 1rem"}}>{coords?`${filtered.length} artists within ${R} km`:`${filtered.length} artists`}</p>
+        <p style={{color:MUTED,fontSize:13,margin:"0.75rem 0 1rem"}}>{activeCoords?`${filtered.length} artists within ${R} km`:`${filtered.length} artists`}</p>
         {filtered.length===0&&<div style={{textAlign:"center",padding:"3rem 1rem",color:MUTED}}><div style={{fontSize:40,marginBottom:10}}>🌿</div><p>No artists found nearby.</p></div>}
         {filtered.map(a=>{
           const from=a.pricing?.coverage?.["One Hand"]??DEF_PRICE.coverage["One Hand"];
