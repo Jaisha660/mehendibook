@@ -412,30 +412,13 @@ function CHome({artists,user,onArtist,onSignOut,onChat,reviewBk,onReview}){
   const [tab,setTab]=useState("home");
   const [myBks,setMyBks]=useState([]);
   const [myRvs,setMyRvs]=useState([]);
-  const [unseen,setUnseen]=useState(0);
-  const seenKey=`mehendi:seenStatus:${user.id}`;
-  const getSeen=()=>{try{return JSON.parse(localStorage.getItem(seenKey)||"{}");}catch{return{};}};
-  const setSeen=m=>{try{localStorage.setItem(seenKey,JSON.stringify(m));}catch{}};
-
   useEffect(()=>{
     const load=async()=>{
-      // Read only this customer's own bookings via their index — not the whole
-      // bookings collection — so other customers' addresses/phones stay private.
-      const idx=await sget(`bookingsByUser/${user.id}`);
-      const ids=idx?Object.keys(idx):[];
-      const list=(await Promise.all(ids.map(id=>sgetOne("bookings",id)))).filter(Boolean).filter(b=>b.customerId===user.id);
-      setMyBks(list);
-      const seen=getSeen();
-      setUnseen(list.filter(b=>seen[b.id]!==b.status).length);
+      const b=await sgetCollection("bookings");setMyBks(b.filter(x=>x.customerId===user.id));
       const r=await sgetCollection("reviews");setMyRvs(r.filter(x=>x.customerId===user.id));
     };
     load();const t=setInterval(load,5000);return()=>clearInterval(t);
   },[user.id]);
-
-  const openBookings=()=>{
-    setTab("bookings");
-    const map={};myBks.forEach(b=>{map[b.id]=b.status;});setSeen(map);setUnseen(0);
-  };
 
   return (
     <div style={{background:BG,minHeight:"100vh",color:TXT,fontFamily:"system-ui,sans-serif"}}>
@@ -446,15 +429,11 @@ function CHome({artists,user,onArtist,onSignOut,onChat,reviewBk,onReview}){
           <button onClick={onSignOut} style={{background:CARD2,border:`1px solid ${BORDER}`,color:MUTED,borderRadius:10,padding:"6px 12px",cursor:"pointer",fontSize:12}}>Sign out</button>
         </div>
         <div style={{display:"flex",gap:2,borderBottom:`1px solid ${BORDER}`}}>
-          <button onClick={()=>setTab("home")} style={{padding:"8px 14px",background:"none",border:"none",borderBottom:tab==="home"?`2px solid ${G}`:"2px solid transparent",color:tab==="home"?G:MUTED,cursor:"pointer",fontSize:13,fontWeight:tab==="home"?500:400,marginBottom:-1}}>Find Artists</button>
-          <button onClick={openBookings} style={{padding:"8px 14px",background:"none",border:"none",borderBottom:tab==="bookings"?`2px solid ${G}`:"2px solid transparent",color:tab==="bookings"?G:MUTED,cursor:"pointer",fontSize:13,fontWeight:tab==="bookings"?500:400,marginBottom:-1,position:"relative"}}>
-            My Bookings{myBks.length?` (${myBks.length})`:""}
-            {unseen>0&&<span style={{position:"absolute",top:2,right:-2,width:8,height:8,borderRadius:"50%",background:RED}}/>}
-          </button>
+          {[{id:"home",label:"Find Artists"},{id:"bookings",label:`My Bookings${myBks.length?` (${myBks.length})`:""}`}].map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={{padding:"8px 14px",background:"none",border:"none",borderBottom:tab===t.id?`2px solid ${G}`:"2px solid transparent",color:tab===t.id?G:MUTED,cursor:"pointer",fontSize:13,fontWeight:tab===t.id?500:400,marginBottom:-1}}>{t.label}</button>)}
         </div>
       </div>
       {tab==="home"&&<FindArtists artists={artists} onArtist={onArtist}/>}
-      {tab==="bookings"&&<BookingHistory bookings={myBks} reviews={myRvs} onChat={onChat} onReview={onReview} onCancelled={b=>setMyBks(p=>p.map(x=>x.id===b.id?{...x,status:"cancelled"}:x))}/>}
+      {tab==="bookings"&&<BookingHistory bookings={myBks} reviews={myRvs} onChat={onChat} onReview={onReview}/>}
     </div>
   );
 }
@@ -570,25 +549,14 @@ function FindArtists({artists,onArtist}){
   );
 }
 
-function BookingHistory({bookings,reviews,onChat,onReview,onCancelled}){
+function BookingHistory({bookings,reviews,onChat,onReview}){
   const sorted=[...bookings].reverse();
-  const [cancelling,setCancelling]=useState(null);
-  const cancel=async(b)=>{
-    if(!window.confirm(`Cancel this booking with ${b.artistName}?`))return;
-    setCancelling(b.id);
-    await supdateOne("bookings",b.id,{status:"cancelled",cancelledBy:"customer",cancelledAt:new Date().toISOString()});
-    await supdateOne("requests",b.id,{status:"cancelled"});
-    if(b.date?.full&&b.time)await sdelOne(`availability/${b.artistId}/${b.date.full}`,b.time);
-    setCancelling(null);
-    onCancelled?.(b);
-  };
   if(!sorted.length) return <div style={{textAlign:"center",padding:"3rem 1rem",color:MUTED}}><div style={{fontSize:40,marginBottom:10}}>📋</div><p>No bookings yet.</p></div>;
   return <div style={{padding:"1rem 1rem 2rem"}}>
     {sorted.map(b=>{
       const rv=reviews.find(r=>r.bookingId===b.id);
       const canReview=b.trackStep===5&&!rv&&b.status==="accepted";
-      const canCancel=["pending","accepted"].includes(b.status)&&(b.trackStep??0)<5;
-      const sc=b.status==="accepted"?"approved":b.status==="rejected"?"rejected":b.status==="completed"?"completed":b.status==="cancelled"?"rejected":"pending";
+      const sc=b.status==="accepted"?"approved":b.status==="rejected"?"rejected":b.status==="completed"?"completed":"pending";
       return <div key={b.id} style={{background:CARD,borderRadius:16,border:`1px solid ${BORDER}`,padding:"14px",marginBottom:12}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
           <div>
@@ -600,9 +568,8 @@ function BookingHistory({bookings,reviews,onChat,onReview,onCancelled}){
         </div>
         {b.status==="accepted"&&b.trackStep!=null&&<div style={{background:CARD2,borderRadius:10,padding:"8px 12px",marginBottom:10}}><p style={{margin:0,fontSize:12,color:MUTED}}>Status: <span style={{color:G,fontWeight:500}}>{TRACK[b.trackStep]}</span></p></div>}
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          {b.status!=="rejected"&&b.status!=="cancelled"&&<Btn small variant="ghost" onClick={()=>onChat(b)}>💬 Chat</Btn>}
+          {b.status!=="rejected"&&<Btn small variant="ghost" onClick={()=>onChat(b)}>💬 Chat</Btn>}
           {canReview&&<Btn small variant="secondary" onClick={()=>onReview(b)}>⭐ Rate & Review</Btn>}
-          {canCancel&&<Btn small variant="danger" disabled={cancelling===b.id} onClick={()=>cancel(b)}>{cancelling===b.id?"Cancelling…":"✕ Cancel Booking"}</Btn>}
           {rv&&<div style={{display:"flex",alignItems:"center",gap:4}}><Stars rating={rv.rating}/><span style={{fontSize:11,color:MUTED}}>Your review</span></div>}
         </div>
       </div>;
@@ -687,36 +654,17 @@ function BookingFlow({artist,user,onConfirm,onBack}){
   const [date,setDate]=useState(null);
   const [time,setTime]=useState(null);
   const [addr,setAddr]=useState("");
-  const [bookedTimes,setBookedTimes]=useState([]);
   const dates=getDates(artist.blockedDates||[]);
   const price=(style&&cov)?calcP(artist,style,cov,occ):null;
   const canNext=[style&&cov&&occ,date&&time,addr.trim()][step];
   const STEPS=["Style & Coverage","Date & Time","Location"];
   const p=artist.pricing||DEF_PRICE;
-
-  // Check which slots are already taken for this artist on the chosen date —
-  // reads only a lightweight occupancy list (no other customer's private details).
-  useEffect(()=>{
-    if(!date){setBookedTimes([]);return;}
-    (async()=>{
-      const taken=await sget(`availability/${artist.id}/${date.full}`);
-      setBookedTimes(taken?Object.keys(taken):[]);
-    })();
-  },[date,artist.id]);
-
   const confirm=async()=>{
     const fp=calcP(artist,style,cov,occ);
     const bid=gid();
     const b={id:bid,artistId:artist.id,artistName:artist.name,customerId:user.id,customerName:user.name,customerPhone:user.phone,style,coverage:cov,occasion:occ,date,time,address:addr,price:fp,status:"pending",trackStep:0,createdAt:new Date().toISOString()};
     await ssetOne("bookings",bid,b);
     await ssetOne("requests",bid,b);
-    // Lightweight indexes so each party can find only their own bookings/requests
-    // without needing broad read access to everyone else's data.
-    await ssetOne(`bookingsByUser/${user.id}`,bid,true);
-    await ssetOne(`bookingsByUser/${artist.id}`,bid,true);
-    await ssetOne(`requestsByArtist/${artist.id}`,bid,true);
-    // Mark this slot taken so no one else can double-book the same artist/date/time.
-    await ssetOne(`availability/${artist.id}/${date.full}`,time,true);
     onConfirm(b);
   };
   return (
@@ -772,7 +720,7 @@ function BookingFlow({artist,user,onConfirm,onBack}){
             <>
               <p style={{fontWeight:600,fontSize:15,margin:"0 0 12px"}}>Select Time</p>
               <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:"1.5rem"}}>
-                {TIMES.map(t=>{const taken=bookedTimes.includes(t);return <button key={t} disabled={taken} onClick={()=>!taken&&setTime(t)} style={{padding:"10px 4px",borderRadius:12,border:`1px solid ${taken?"transparent":time===t?G:BORDER}`,background:taken?CARD2:time===t?G+"22":CARD2,color:taken?BORDER:time===t?G:MUTED,cursor:taken?"not-allowed":"pointer",fontSize:12,opacity:taken?0.4:1}}>{t}{taken?" · Booked":""}</button>;})}
+                {TIMES.map(t=><button key={t} onClick={()=>setTime(t)} style={{padding:"10px 4px",borderRadius:12,border:`1px solid ${time===t?G:BORDER}`,background:time===t?G+"22":CARD2,color:time===t?G:MUTED,cursor:"pointer",fontSize:12}}>{t}</button>)}
               </div>
             </>
           )}
@@ -908,43 +856,17 @@ function ArtistApp({onBack}){
   const [myBks,setMyBks]=useState([]);
   const [chatBk,setChatBk]=useState(null);
   const [blocked,setBlocked]=useState([]);
-  const [unseen,setUnseen]=useState(0);
 
   useEffect(()=>{
     if(!user)return;
     setOnline(user.online||false);
     setBlocked(user.blockedDates||[]);
-    const seenKey=`mehendi:seenStatus:${user.id}`;
-    const getSeen=()=>{try{return JSON.parse(localStorage.getItem(seenKey)||"{}");}catch{return{};}};
-    const setSeen=m=>{try{localStorage.setItem(seenKey,JSON.stringify(m));}catch{}};
     const load=async()=>{
-      // Read only this artist's own requests/bookings via their index — not the
-      // whole collection — so other artists'/customers' data stays private.
-      const reqIdx=await sget(`requestsByArtist/${user.id}`);
-      const reqIds=reqIdx?Object.keys(reqIdx):[];
-      const reqList=(await Promise.all(reqIds.map(id=>sgetOne("requests",id)))).filter(Boolean).filter(r=>r.artistId===user.id&&r.status==="pending");
-      setRequests(reqList);
-
-      const bkIdx=await sget(`bookingsByUser/${user.id}`);
-      const bkIds=bkIdx?Object.keys(bkIdx):[];
-      const bkList=(await Promise.all(bkIds.map(id=>sgetOne("bookings",id)))).filter(Boolean).filter(b=>b.artistId===user.id);
-      setMyBks(bkList);
-
-      if(tab!=="bookings"){
-        const seen=getSeen();
-        setUnseen(bkList.filter(b=>seen[b.id]!==b.status).length);
-      }
+      const rqs=await sgetCollection("requests");setRequests(rqs.filter(r=>r.artistId===user.id&&r.status==="pending"));
+      const bks=await sgetCollection("bookings");setMyBks(bks.filter(b=>b.artistId===user.id));
     };
     load();const t=setInterval(load,4000);return()=>clearInterval(t);
-  },[user,tab]);
-
-  const openMyBookings=()=>{
-    setTab("bookings");
-    const seenKey=`mehendi:seenStatus:${user.id}`;
-    const map={};myBks.forEach(b=>{map[b.id]=b.status;});
-    try{localStorage.setItem(seenKey,JSON.stringify(map));}catch{}
-    setUnseen(0);
-  };
+  },[user]);
 
   const [resetSent,setResetSent]=useState(false);
   const [pendingUid,setPendingUid]=useState(null); // holds the Firebase uid between signup step 0 → profile step 1
@@ -1153,7 +1075,7 @@ function ArtistApp({onBack}){
         )}
       </div>
       <div style={{padding:"0 1rem 2rem"}}>
-        <Tabs tabs={[{id:"requests",label:"Requests",count:requests.length},{id:"bookings",label:unseen>0?"Bookings 🔴":"Bookings"},{id:"calendar",label:"Calendar"},{id:"profile",label:"Profile"}]} active={tab==="editprofile"?"profile":tab} onChange={id=>id==="bookings"?openMyBookings():setTab(id)}/>
+        <Tabs tabs={[{id:"requests",label:"Requests",count:requests.length},{id:"bookings",label:"Bookings"},{id:"calendar",label:"Calendar"},{id:"profile",label:"Profile"}]} active={tab==="editprofile"?"profile":tab} onChange={setTab}/>
         {tab==="requests"&&(
           <div>
             {requests.length===0?<div style={{textAlign:"center",padding:"2rem",color:MUTED}}><div style={{fontSize:36,marginBottom:8}}>📭</div><p>No new requests.</p></div>:
@@ -1182,7 +1104,6 @@ function ArtistApp({onBack}){
             {myBks.length===0?<div style={{textAlign:"center",padding:"2rem",color:MUTED}}><div style={{fontSize:36,marginBottom:8}}>📅</div><p>No bookings yet.</p></div>:
               [...myBks].reverse().map(b=>{
                 const ts=b.trackStep??0;
-                const canCancel=["pending","accepted"].includes(b.status)&&ts<5;
                 return (
                   <div key={b.id} style={{background:CARD,borderRadius:14,border:`1px solid ${b.status==="accepted"?G+"44":BORDER}`,padding:"14px",marginBottom:10}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
@@ -1192,7 +1113,7 @@ function ArtistApp({onBack}){
                       </div>
                       <div style={{textAlign:"right"}}>
                         <p style={{margin:0,color:G,fontWeight:700}}>₹{b.price}</p>
-                        <Bdg label={b.status} color={b.status==="accepted"?"approved":b.status==="rejected"||b.status==="cancelled"?"rejected":"pending"}/>
+                        <Bdg label={b.status} color={b.status==="accepted"?"approved":b.status==="rejected"?"rejected":"pending"}/>
                       </div>
                     </div>
                     {b.status==="accepted"&&(
@@ -1203,16 +1124,7 @@ function ArtistApp({onBack}){
                         </div>
                       </div>
                     )}
-                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                      {b.status!=="rejected"&&b.status!=="cancelled"&&<Btn small variant="ghost" onClick={()=>setChatBk(b)}>💬 Chat with Customer</Btn>}
-                      {canCancel&&<Btn small variant="danger" onClick={async()=>{
-                        if(!window.confirm(`Cancel this booking with ${b.customerName}?`))return;
-                        await supdateOne("bookings",b.id,{status:"cancelled",cancelledBy:"artist",cancelledAt:new Date().toISOString()});
-                        await supdateOne("requests",b.id,{status:"cancelled"});
-                        if(b.date?.full&&b.time)await sdelOne(`availability/${b.artistId}/${b.date.full}`,b.time);
-                        setMyBks(p=>p.map(x=>x.id===b.id?{...x,status:"cancelled"}:x));
-                      }}>✕ Cancel</Btn>}
-                    </div>
+                    <Btn small variant="ghost" onClick={()=>setChatBk(b)}>💬 Chat with Customer</Btn>
                   </div>
                 );
               })}

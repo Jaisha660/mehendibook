@@ -216,90 +216,6 @@ function ChatScreen({booking,currentUser,currentRole,onBack}){
 
 
 // ── ADMIN APP ──────────────────────────────────────────────
-function BarChart({data,valueFmt}){
-  // data: [{label, value}], renders a simple horizontal-scroll bar chart, no external chart library needed.
-  const max=Math.max(1,...data.map(d=>d.value));
-  return (
-    <div style={{display:"flex",alignItems:"flex-end",gap:10,height:140,overflowX:"auto",padding:"0 4px 4px"}}>
-      {data.map((d,i)=>(
-        <div key={i} style={{display:"flex",flexDirection:"column",alignItems:"center",minWidth:38,flexShrink:0}}>
-          <p style={{margin:"0 0 4px",fontSize:10,color:G,fontWeight:600}}>{valueFmt?valueFmt(d.value):d.value}</p>
-          <div style={{width:24,height:Math.max(4,(d.value/max)*90),background:`linear-gradient(180deg,${G2},${G})`,borderRadius:"4px 4px 0 0"}}/>
-          <p style={{margin:"6px 0 0",fontSize:9,color:MUTED,textAlign:"center",whiteSpace:"nowrap"}}>{d.label}</p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function AnalyticsPanel({bookings,artists}){
-  const paidStatuses=["accepted","completed"];
-  const paid=bookings.filter(b=>paidStatuses.includes(b.status));
-
-  // Revenue for each of the last 7 days
-  const days=Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()-(6-i));return d;});
-  const revByDay=days.map(d=>{
-    const key=d.toDateString();
-    const total=paid.filter(b=>b.createdAt&&new Date(b.createdAt).toDateString()===key).reduce((s,b)=>s+Number(b.price||0),0);
-    return{label:d.toLocaleDateString(undefined,{weekday:"short"}),value:total};
-  });
-  const totalRevenue=paid.reduce((s,b)=>s+Number(b.price||0),0);
-
-  // Busiest artists — top 5 by total booking count
-  const countByArtist={};
-  bookings.forEach(b=>{countByArtist[b.artistId]=(countByArtist[b.artistId]||0)+1;});
-  const busiest=Object.entries(countByArtist).map(([id,count])=>({label:(artists.find(a=>a.id===id)?.name||"Unknown").split(" ")[0],value:count})).sort((a,b)=>b.value-a.value).slice(0,5);
-
-  // Status breakdown
-  const statuses=["pending","accepted","rejected","completed","cancelled"];
-  const statusCounts=statuses.map(s=>({label:s,value:bookings.filter(b=>b.status===s).length})).filter(s=>s.value>0);
-  const statusColors={pending:G,accepted:GREEN,rejected:RED,completed:"#4A90D9",cancelled:MUTED};
-
-  return (
-    <div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:"1.5rem"}}>
-        <div style={{background:CARD,borderRadius:14,border:`1px solid ${BORDER}`,padding:"14px",textAlign:"center"}}>
-          <p style={{margin:0,fontSize:11,color:MUTED}}>Total Revenue</p>
-          <p style={{margin:"4px 0 0",fontSize:22,fontWeight:700,color:G}}>₹{totalRevenue}</p>
-        </div>
-        <div style={{background:CARD,borderRadius:14,border:`1px solid ${BORDER}`,padding:"14px",textAlign:"center"}}>
-          <p style={{margin:0,fontSize:11,color:MUTED}}>Confirmed Bookings</p>
-          <p style={{margin:"4px 0 0",fontSize:22,fontWeight:700,color:G}}>{paid.length}</p>
-        </div>
-      </div>
-
-      <p style={{fontSize:13,fontWeight:600,margin:"0 0 10px"}}>Revenue — last 7 days</p>
-      <div style={{background:CARD,borderRadius:14,border:`1px solid ${BORDER}`,padding:"14px",marginBottom:"1.5rem"}}>
-        <BarChart data={revByDay} valueFmt={v=>v?`₹${v}`:""}/>
-      </div>
-
-      <p style={{fontSize:13,fontWeight:600,margin:"0 0 10px"}}>Busiest artists</p>
-      <div style={{background:CARD,borderRadius:14,border:`1px solid ${BORDER}`,padding:"14px",marginBottom:"1.5rem"}}>
-        {busiest.length===0?<p style={{fontSize:12,color:MUTED,margin:0}}>No bookings yet.</p>:<BarChart data={busiest}/>}
-      </div>
-
-      <p style={{fontSize:13,fontWeight:600,margin:"0 0 10px"}}>Booking status breakdown</p>
-      <div style={{background:CARD,borderRadius:14,border:`1px solid ${BORDER}`,padding:"14px"}}>
-        {statusCounts.length===0?<p style={{fontSize:12,color:MUTED,margin:0}}>No bookings yet.</p>:(
-          <div>
-            <div style={{display:"flex",height:14,borderRadius:8,overflow:"hidden",marginBottom:10}}>
-              {statusCounts.map(s=><div key={s.label} style={{flex:s.value,background:statusColors[s.label]}}/>)}
-            </div>
-            <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
-              {statusCounts.map(s=>(
-                <div key={s.label} style={{display:"flex",alignItems:"center",gap:5}}>
-                  <div style={{width:9,height:9,borderRadius:"50%",background:statusColors[s.label]}}/>
-                  <span style={{fontSize:11,color:MUTED,textTransform:"capitalize"}}>{s.label} ({s.value})</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function AdminApp({onBack}){
   const [loggedIn,setLoggedIn]=useState(false);
   const [authChecked,setAuthChecked]=useState(false);
@@ -404,8 +320,7 @@ function AdminApp({onBack}){
         </div>
       </div>
       <div style={{padding:"0 1rem 2rem"}}>
-        <Tabs tabs={[{id:"analytics",label:"Analytics"},{id:"artists",label:"Artists",count:artists.length},{id:"bookings",label:"Bookings",count:bookings.length},{id:"customers",label:"Customers",count:customers.length},{id:"reviews",label:"Reviews",count:reviews.length}]} active={tab} onChange={setTab}/>
-        {tab==="analytics"&&<AnalyticsPanel bookings={bookings} artists={artists}/>}
+        <Tabs tabs={[{id:"artists",label:"Artists",count:artists.length},{id:"bookings",label:"Bookings",count:bookings.length},{id:"customers",label:"Customers",count:customers.length},{id:"reviews",label:"Reviews",count:reviews.length}]} active={tab} onChange={setTab}/>
         {tab==="artists"&&(
           <div>
             {pending.length>0&&(
