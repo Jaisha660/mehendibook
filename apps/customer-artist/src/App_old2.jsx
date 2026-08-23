@@ -402,14 +402,13 @@ function CustomerApp({onBack}){
 
   if(chatBk) return <ChatScreen booking={chatBk} currentUser={user} currentRole="customer" onBack={()=>setChatBk(null)}/>;
   if(screen==="profile"&&artist) return <ArtistProfile artist={artist} onBook={()=>setScreen("booking")} onBack={()=>setScreen("home")}/>;
-  if(screen==="booking"&&artist) return <BookingFlow artist={artist} user={user} onConfirm={b=>{setBooking(b);setScreen("payment");}} onBack={()=>setScreen("profile")}/>;
-  if(screen==="payment"&&booking) return <PayDepositScreen booking={booking} onPaid={()=>setScreen("tracking")} onBack={()=>{setScreen("home");setBooking(null);setArtist(null);}}/>;
+  if(screen==="booking"&&artist) return <BookingFlow artist={artist} user={user} onConfirm={b=>{setBooking(b);setScreen("tracking");}} onBack={()=>setScreen("profile")}/>;
   if(screen==="tracking"&&booking) return <TrackingScreen booking={booking} user={user} onDone={()=>{setScreen("home");setBooking(null);setArtist(null);}} onChat={b=>setChatBk(b)}/>;
 
-  return <CHome artists={artists} user={user} onArtist={a=>{setArtist(a);setScreen("profile");}} onSignOut={signOutUser} onChat={b=>setChatBk(b)} reviewBk={reviewBk} onReview={setReviewBk} onResumePayment={b=>{setBooking(b);setScreen("payment");}}/>;
+  return <CHome artists={artists} user={user} onArtist={a=>{setArtist(a);setScreen("profile");}} onSignOut={signOutUser} onChat={b=>setChatBk(b)} reviewBk={reviewBk} onReview={setReviewBk}/>;
 }
 
-function CHome({artists,user,onArtist,onSignOut,onChat,reviewBk,onReview,onResumePayment}){
+function CHome({artists,user,onArtist,onSignOut,onChat,reviewBk,onReview}){
   const [tab,setTab]=useState("home");
   const [myBks,setMyBks]=useState([]);
   const [myRvs,setMyRvs]=useState([]);
@@ -455,7 +454,7 @@ function CHome({artists,user,onArtist,onSignOut,onChat,reviewBk,onReview,onResum
         </div>
       </div>
       {tab==="home"&&<FindArtists artists={artists} onArtist={onArtist}/>}
-      {tab==="bookings"&&<BookingHistory bookings={myBks} reviews={myRvs} onChat={onChat} onReview={onReview} onCancelled={b=>setMyBks(p=>p.map(x=>x.id===b.id?{...x,status:"cancelled"}:x))} onResumePayment={onResumePayment}/>}
+      {tab==="bookings"&&<BookingHistory bookings={myBks} reviews={myRvs} onChat={onChat} onReview={onReview} onCancelled={b=>setMyBks(p=>p.map(x=>x.id===b.id?{...x,status:"cancelled"}:x))}/>}
     </div>
   );
 }
@@ -571,14 +570,14 @@ function FindArtists({artists,onArtist}){
   );
 }
 
-function BookingHistory({bookings,reviews,onChat,onReview,onCancelled,onResumePayment}){
+function BookingHistory({bookings,reviews,onChat,onReview,onCancelled}){
   const sorted=[...bookings].reverse();
   const [cancelling,setCancelling]=useState(null);
   const cancel=async(b)=>{
     if(!window.confirm(`Cancel this booking with ${b.artistName}?`))return;
     setCancelling(b.id);
     await supdateOne("bookings",b.id,{status:"cancelled",cancelledBy:"customer",cancelledAt:new Date().toISOString()});
-    if(b.status!=="pending_payment")await supdateOne("requests",b.id,{status:"cancelled"});
+    await supdateOne("requests",b.id,{status:"cancelled"});
     if(b.date?.full&&b.time)await sdelOne(`availability/${b.artistId}/${b.date.full}`,b.time);
     setCancelling(null);
     onCancelled?.(b);
@@ -587,23 +586,21 @@ function BookingHistory({bookings,reviews,onChat,onReview,onCancelled,onResumePa
   return <div style={{padding:"1rem 1rem 2rem"}}>
     {sorted.map(b=>{
       const rv=reviews.find(r=>r.bookingId===b.id);
-      const canReview=b.trackStep===5&&!rv&&b.status==="accepted"&&b.balancePaid;
-      const canCancel=["pending_payment","pending","accepted"].includes(b.status)&&(b.trackStep??0)<5;
-      const sc=b.status==="accepted"?"approved":b.status==="rejected"?"rejected":b.status==="completed"?"completed":b.status==="cancelled"?"rejected":b.status==="pending_payment"?"pending":"pending";
-      return <div key={b.id} style={{background:CARD,borderRadius:16,border:`1px solid ${b.status==="pending_payment"?G+"66":BORDER}`,padding:"14px",marginBottom:12}}>
+      const canReview=b.trackStep===5&&!rv&&b.status==="accepted";
+      const canCancel=["pending","accepted"].includes(b.status)&&(b.trackStep??0)<5;
+      const sc=b.status==="accepted"?"approved":b.status==="rejected"?"rejected":b.status==="completed"?"completed":b.status==="cancelled"?"rejected":"pending";
+      return <div key={b.id} style={{background:CARD,borderRadius:16,border:`1px solid ${BORDER}`,padding:"14px",marginBottom:12}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
           <div>
             <p style={{margin:0,fontWeight:600,fontSize:15}}>{b.artistName}</p>
             <p style={{margin:"2px 0 0",fontSize:12,color:MUTED}}>{b.style} · {b.coverage}</p>
             <p style={{margin:"2px 0 0",fontSize:12,color:MUTED}}>{b.occasion} · {b.date?.label}, {b.date?.date} {b.date?.month} · {b.time}</p>
           </div>
-          <div style={{textAlign:"right"}}><p style={{margin:0,fontWeight:700,color:G}}>₹{b.price}</p><Bdg label={b.status==="pending_payment"?"awaiting payment":b.status} color={sc}/></div>
+          <div style={{textAlign:"right"}}><p style={{margin:0,fontWeight:700,color:G}}>₹{b.price}</p><Bdg label={b.status} color={sc}/></div>
         </div>
-        {b.status==="pending_payment"&&<div style={{background:G+"15",border:`1px solid ${G}44`,borderRadius:10,padding:"8px 12px",marginBottom:10}}><p style={{margin:0,fontSize:12,color:G}}>Pay the ₹{b.depositAmount} deposit to send this request to {b.artistName}.</p></div>}
-        {b.status==="accepted"&&b.trackStep!=null&&<div style={{background:CARD2,borderRadius:10,padding:"8px 12px",marginBottom:10}}><p style={{margin:0,fontSize:12,color:MUTED}}>Status: <span style={{color:G,fontWeight:500}}>{TRACK[b.trackStep]}</span>{b.trackStep===5&&!b.balancePaid?" · Balance due":""}</p></div>}
+        {b.status==="accepted"&&b.trackStep!=null&&<div style={{background:CARD2,borderRadius:10,padding:"8px 12px",marginBottom:10}}><p style={{margin:0,fontSize:12,color:MUTED}}>Status: <span style={{color:G,fontWeight:500}}>{TRACK[b.trackStep]}</span></p></div>}
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          {b.status==="pending_payment"&&<Btn small onClick={()=>onResumePayment?.(b)}>💳 Complete Payment</Btn>}
-          {b.status!=="rejected"&&b.status!=="cancelled"&&b.status!=="pending_payment"&&<Btn small variant="ghost" onClick={()=>onChat(b)}>💬 Chat</Btn>}
+          {b.status!=="rejected"&&b.status!=="cancelled"&&<Btn small variant="ghost" onClick={()=>onChat(b)}>💬 Chat</Btn>}
           {canReview&&<Btn small variant="secondary" onClick={()=>onReview(b)}>⭐ Rate & Review</Btn>}
           {canCancel&&<Btn small variant="danger" disabled={cancelling===b.id} onClick={()=>cancel(b)}>{cancelling===b.id?"Cancelling…":"✕ Cancel Booking"}</Btn>}
           {rv&&<div style={{display:"flex",alignItems:"center",gap:4}}><Stars rating={rv.rating}/><span style={{fontSize:11,color:MUTED}}>Your review</span></div>}
@@ -682,75 +679,6 @@ function ArtistProfile({artist,onBook,onBack}){
   );
 }
 
-function PayButton({booking,purpose,amount,label,onPaid}){
-  const [loading,setLoading]=useState(false);
-  const [err,setErr]=useState("");
-  const pay=async()=>{
-    setErr("");setLoading(true);
-    try{
-      if(!window.Razorpay){
-        await new Promise((res,rej)=>{
-          const s=document.createElement("script");
-          s.src="https://checkout.razorpay.com/v1/checkout.js";
-          s.onload=res;s.onerror=()=>rej(new Error("Could not load payment gateway. Check your connection."));
-          document.body.appendChild(s);
-        });
-      }
-      const orderRes=await fetch("/api/create-order",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({amount:Math.round(amount*100),bookingId:booking.id,purpose})});
-      const order=await orderRes.json();
-      if(!orderRes.ok)throw new Error(order.error||"Could not start payment.");
-      const rz=new window.Razorpay({
-        key:import.meta.env.VITE_RAZORPAY_KEY_ID,
-        amount:order.amount,
-        currency:order.currency,
-        order_id:order.orderId,
-        name:"MehendiBook",
-        description:purpose==="deposit"?`Booking deposit — ${booking.artistName}`:`Balance payment — ${booking.artistName}`,
-        prefill:{name:booking.customerName,contact:booking.customerPhone},
-        theme:{color:"#C9A84C"},
-        handler:async(response)=>{
-          setLoading(true);
-          try{
-            const verifyRes=await fetch("/api/verify-payment",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({razorpay_order_id:response.razorpay_order_id,razorpay_payment_id:response.razorpay_payment_id,razorpay_signature:response.razorpay_signature,bookingId:booking.id,purpose})});
-            const verify=await verifyRes.json();
-            if(!verifyRes.ok)throw new Error(verify.error||"Payment verification failed.");
-            onPaid();
-          }catch(e){setErr(e.message);}
-          setLoading(false);
-        },
-        modal:{ondismiss:()=>setLoading(false)},
-      });
-      rz.on("payment.failed",()=>{setErr("Payment failed. Please try again.");setLoading(false);});
-      rz.open();
-    }catch(e){setErr(e.message);setLoading(false);}
-  };
-  return (
-    <div>
-      {err&&<p style={{fontSize:12,color:RED,margin:"0 0 8px"}}>{err}</p>}
-      <Btn full disabled={loading} onClick={pay}>{loading?"Processing…":label}</Btn>
-    </div>
-  );
-}
-
-function PayDepositScreen({booking,onPaid,onBack}){
-  return (
-    <div style={{background:BG,minHeight:"100vh",color:TXT,fontFamily:"system-ui,sans-serif",display:"flex",alignItems:"center",justifyContent:"center",padding:"1.5rem"}}>
-      <div style={{maxWidth:380,width:"100%",textAlign:"center"}}>
-        <div style={{fontSize:52,marginBottom:"1rem"}}>💳</div>
-        <h2 style={{margin:"0 0 8px",fontSize:19,fontWeight:700}}>Reserve your slot</h2>
-        <p style={{margin:"0 0 1.5rem",fontSize:13,color:MUTED,lineHeight:1.6}}>Pay a 20% deposit to send your request to <strong style={{color:TXT}}>{booking.artistName}</strong>. The rest is due after your session.</p>
-        <div style={{background:CARD,borderRadius:14,border:`1px solid ${BORDER}`,padding:"14px",marginBottom:"1.5rem",textAlign:"left"}}>
-          {[["Total price",`₹${booking.price}`],["Deposit now (20%)",`₹${booking.depositAmount}`],["Due after session",`₹${booking.price-booking.depositAmount}`]].map(([k,v])=>(
-            <div key={k} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderTop:`1px solid ${BORDER}`,fontSize:13}}><span style={{color:MUTED}}>{k}</span><span style={{color:TXT,fontWeight:500}}>{v}</span></div>
-          ))}
-        </div>
-        <PayButton booking={booking} purpose="deposit" amount={booking.depositAmount} label={`Pay ₹${booking.depositAmount} Deposit →`} onPaid={onPaid}/>
-        <p style={{marginTop:"1rem"}}><button onClick={onBack} style={{background:"none",border:"none",color:MUTED,fontSize:13,cursor:"pointer"}}>Pay later — save as pending</button></p>
-      </div>
-    </div>
-  );
-}
-
 function BookingFlow({artist,user,onConfirm,onBack}){
   const [step,setStep]=useState(0);
   const [style,setStyle]=useState("");
@@ -779,16 +707,15 @@ function BookingFlow({artist,user,onConfirm,onBack}){
   const confirm=async()=>{
     const fp=calcP(artist,style,cov,occ);
     const bid=gid();
-    const depositAmount=Math.round(fp*0.2);
-    const b={id:bid,artistId:artist.id,artistName:artist.name,customerId:user.id,customerName:user.name,customerPhone:user.phone,style,coverage:cov,occasion:occ,date,time,address:addr,price:fp,depositAmount,status:"pending_payment",trackStep:0,createdAt:new Date().toISOString()};
+    const b={id:bid,artistId:artist.id,artistName:artist.name,customerId:user.id,customerName:user.name,customerPhone:user.phone,style,coverage:cov,occasion:occ,date,time,address:addr,price:fp,status:"pending",trackStep:0,createdAt:new Date().toISOString()};
     await ssetOne("bookings",bid,b);
-    // Only the customer's own index entry is written here — the artist has zero
-    // visibility into this booking until the deposit is verified server-side.
-    // The "requests" record and the artist's index entries are created by
-    // /api/verify-payment.js using a privileged connection, never by the browser
-    // — so a customer can never fake their way to "paid" by editing the client.
+    await ssetOne("requests",bid,b);
+    // Lightweight indexes so each party can find only their own bookings/requests
+    // without needing broad read access to everyone else's data.
     await ssetOne(`bookingsByUser/${user.id}`,bid,true);
-    // Reserve the slot immediately so no one else can double-book it during checkout.
+    await ssetOne(`bookingsByUser/${artist.id}`,bid,true);
+    await ssetOne(`requestsByArtist/${artist.id}`,bid,true);
+    // Mark this slot taken so no one else can double-book the same artist/date/time.
     await ssetOne(`availability/${artist.id}/${date.full}`,time,true);
     onConfirm(b);
   };
@@ -875,28 +802,15 @@ function BookingFlow({artist,user,onConfirm,onBack}){
 
 function TrackingScreen({booking,user,onDone,onChat}){
   const [tStep,setTStep]=useState(0);
-  const [status,setStatus]=useState(booking.status);
-  const [balancePaid,setBalancePaid]=useState(!!booking.balancePaid);
+  const [status,setStatus]=useState("pending");
   const [showRv,setShowRv]=useState(false);
   const [done,setDone]=useState(false);
   useEffect(()=>{
-    const poll=async()=>{const live=await sgetOne("bookings",booking.id);if(live){setStatus(live.status);if(live.trackStep!=null)setTStep(live.trackStep);setBalancePaid(!!live.balancePaid);}};
+    const poll=async()=>{const live=await sgetOne("bookings",booking.id);if(live){setStatus(live.status);if(live.trackStep!=null)setTStep(live.trackStep);}};
     poll();const t=setInterval(poll,3000);return()=>clearInterval(t);
   },[booking.id]);
   const completed=tStep===TRACK.length-1;
-  const balanceDue=booking.price-(booking.depositAmount||0);
   if(showRv) return <ReviewModal booking={{...booking,trackStep:tStep}} user={user} onSubmit={()=>{setShowRv(false);setDone(true);}} onClose={()=>setShowRv(false)}/>;
-  if(status==="pending_payment") return (
-    <div style={{background:BG,minHeight:"100vh",color:TXT,fontFamily:"system-ui,sans-serif",display:"flex",alignItems:"center",justifyContent:"center"}}>
-      <div style={{textAlign:"center",padding:"2rem",maxWidth:320}}>
-        <div style={{fontSize:60,marginBottom:"1rem"}}>💳</div>
-        <h2 style={{color:G,margin:"0 0 0.5rem"}}>Deposit not paid yet</h2>
-        <p style={{color:MUTED,margin:"0 0 1.5rem"}}>Your slot is held, but {booking.artistName} won't see your request until the deposit is paid.</p>
-        <PayButton booking={booking} purpose="deposit" amount={booking.depositAmount} label={`Pay ₹${booking.depositAmount} Deposit →`} onPaid={()=>setStatus("pending")}/>
-        <div style={{marginTop:"0.75rem"}}><Btn small variant="secondary" onClick={onDone}>Back to Home</Btn></div>
-      </div>
-    </div>
-  );
   if(status==="pending") return (
     <div style={{background:BG,minHeight:"100vh",color:TXT,fontFamily:"system-ui,sans-serif",display:"flex",alignItems:"center",justifyContent:"center"}}>
       <div style={{textAlign:"center",padding:"2rem",maxWidth:320}}>
@@ -965,21 +879,11 @@ function TrackingScreen({booking,user,onDone,onChat}){
       </div>
       {completed&&(
         <div style={{background:CARD,borderRadius:14,border:`1px solid ${G}44`,padding:"18px",marginBottom:"1.5rem",textAlign:"center"}}>
-          {!balancePaid?(
-            <>
-              <p style={{margin:"0 0 8px",fontWeight:600}}>Session completed! 🎉</p>
-              <p style={{margin:"0 0 12px",fontSize:13,color:MUTED}}>Remaining balance: <strong style={{color:G}}>₹{balanceDue}</strong></p>
-              <PayButton booking={booking} purpose="balance" amount={balanceDue} label={`Pay ₹${balanceDue} Balance →`} onPaid={()=>setBalancePaid(true)}/>
-            </>
-          ):(
-            <>
-              <p style={{margin:"0 0 12px",fontWeight:600}}>Balance paid ✓</p>
-              <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
-                <Btn onClick={()=>setShowRv(true)}>⭐ Rate & Review</Btn>
-                <Btn variant="secondary" onClick={()=>setDone(true)}>Skip</Btn>
-              </div>
-            </>
-          )}
+          <p style={{margin:"0 0 12px",fontWeight:600}}>Session completed! 🎉</p>
+          <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
+            <Btn onClick={()=>setShowRv(true)}>⭐ Rate & Review</Btn>
+            <Btn variant="secondary" onClick={()=>setDone(true)}>Skip</Btn>
+          </div>
         </div>
       )}
     </div>

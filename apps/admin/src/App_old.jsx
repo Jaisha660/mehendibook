@@ -233,51 +233,44 @@ function BarChart({data,valueFmt}){
 }
 
 function AnalyticsPanel({bookings,artists}){
-  const paidBalance=bookings.filter(b=>b.balancePaid);
+  const paidStatuses=["accepted","completed"];
+  const paid=bookings.filter(b=>paidStatuses.includes(b.status));
 
-  // Platform commission earned — actual revenue, not gross booking value
-  const commissionByDay=Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()-(6-i));return d;}).map(d=>{
+  // Revenue for each of the last 7 days
+  const days=Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()-(6-i));return d;});
+  const revByDay=days.map(d=>{
     const key=d.toDateString();
-    const total=paidBalance.filter(b=>b.payoutMarkedAt||b.balancePaid).filter(b=>b.createdAt&&new Date(b.createdAt).toDateString()===key).reduce((s,b)=>s+Number(b.platformCommission||0),0);
+    const total=paid.filter(b=>b.createdAt&&new Date(b.createdAt).toDateString()===key).reduce((s,b)=>s+Number(b.price||0),0);
     return{label:d.toLocaleDateString(undefined,{weekday:"short"}),value:total};
   });
-  const totalCommission=paidBalance.reduce((s,b)=>s+Number(b.platformCommission||0),0);
-  const totalGrossVolume=paidBalance.reduce((s,b)=>s+Number(b.price||0),0);
-  const pendingPayouts=bookings.filter(b=>b.balancePaid&&b.payoutStatus!=="paid");
-  const pendingPayoutTotal=pendingPayouts.reduce((s,b)=>s+Number(b.artistPayout||0),0);
+  const totalRevenue=paid.reduce((s,b)=>s+Number(b.price||0),0);
 
-  // Busiest artists — top 5 by real booking count (excludes cancelled/rejected, which never actually happened)
+  // Busiest artists — top 5 by total booking count
   const countByArtist={};
-  bookings.filter(b=>!["cancelled","rejected","pending_payment"].includes(b.status)).forEach(b=>{countByArtist[b.artistId]=(countByArtist[b.artistId]||0)+1;});
+  bookings.forEach(b=>{countByArtist[b.artistId]=(countByArtist[b.artistId]||0)+1;});
   const busiest=Object.entries(countByArtist).map(([id,count])=>({label:(artists.find(a=>a.id===id)?.name||"Unknown").split(" ")[0],value:count})).sort((a,b)=>b.value-a.value).slice(0,5);
 
   // Status breakdown
-  const statuses=["pending_payment","pending","accepted","rejected","completed","cancelled"];
+  const statuses=["pending","accepted","rejected","completed","cancelled"];
   const statusCounts=statuses.map(s=>({label:s,value:bookings.filter(b=>b.status===s).length})).filter(s=>s.value>0);
-  const statusColors={pending_payment:MUTED,pending:G,accepted:GREEN,rejected:RED,completed:"#4A90D9",cancelled:MUTED};
+  const statusColors={pending:G,accepted:GREEN,rejected:RED,completed:"#4A90D9",cancelled:MUTED};
 
   return (
     <div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:"1rem"}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:"1.5rem"}}>
         <div style={{background:CARD,borderRadius:14,border:`1px solid ${BORDER}`,padding:"14px",textAlign:"center"}}>
-          <p style={{margin:0,fontSize:11,color:MUTED}}>Platform Commission</p>
-          <p style={{margin:"4px 0 0",fontSize:22,fontWeight:700,color:G}}>₹{totalCommission}</p>
+          <p style={{margin:0,fontSize:11,color:MUTED}}>Total Revenue</p>
+          <p style={{margin:"4px 0 0",fontSize:22,fontWeight:700,color:G}}>₹{totalRevenue}</p>
         </div>
         <div style={{background:CARD,borderRadius:14,border:`1px solid ${BORDER}`,padding:"14px",textAlign:"center"}}>
-          <p style={{margin:0,fontSize:11,color:MUTED}}>Gross Booking Volume</p>
-          <p style={{margin:"4px 0 0",fontSize:22,fontWeight:700,color:TXT}}>₹{totalGrossVolume}</p>
+          <p style={{margin:0,fontSize:11,color:MUTED}}>Confirmed Bookings</p>
+          <p style={{margin:"4px 0 0",fontSize:22,fontWeight:700,color:G}}>{paid.length}</p>
         </div>
       </div>
-      {pendingPayouts.length>0&&(
-        <div style={{background:RED+"15",border:`1px solid ${RED}44`,borderRadius:14,padding:"14px",marginBottom:"1.5rem",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <div><p style={{margin:0,fontSize:12,color:RED,fontWeight:600}}>Owed to artists</p><p style={{margin:"2px 0 0",fontSize:11,color:MUTED}}>{pendingPayouts.length} payout{pendingPayouts.length!==1?"s":""} pending</p></div>
-          <p style={{margin:0,fontSize:20,fontWeight:700,color:RED}}>₹{pendingPayoutTotal}</p>
-        </div>
-      )}
 
-      <p style={{fontSize:13,fontWeight:600,margin:"0 0 10px"}}>Commission earned — last 7 days</p>
+      <p style={{fontSize:13,fontWeight:600,margin:"0 0 10px"}}>Revenue — last 7 days</p>
       <div style={{background:CARD,borderRadius:14,border:`1px solid ${BORDER}`,padding:"14px",marginBottom:"1.5rem"}}>
-        <BarChart data={commissionByDay} valueFmt={v=>v?`₹${v}`:""}/>
+        <BarChart data={revByDay} valueFmt={v=>v?`₹${v}`:""}/>
       </div>
 
       <p style={{fontSize:13,fontWeight:600,margin:"0 0 10px"}}>Busiest artists</p>
@@ -359,11 +352,6 @@ function AdminApp({onBack}){
   const updateArtist=async(id,patch)=>{
     setArtists(prev=>prev.map(a=>a.id===id?{...a,...patch}:a));
     await supdateOne("artists",id,patch);
-  };
-
-  const markPaidOut=async(bookingId)=>{
-    setBookings(prev=>prev.map(b=>b.id===bookingId?{...b,payoutStatus:"paid"}:b));
-    await supdateOne("bookings",bookingId,{payoutStatus:"paid",payoutMarkedAt:new Date().toISOString()});
   };
 
   if(!loggedIn) return (
@@ -490,24 +478,9 @@ function AdminApp({onBack}){
                     </div>
                     <div style={{textAlign:"right"}}>
                       <p style={{margin:0,fontWeight:700,color:G}}>₹{b.price}</p>
-                      <Bdg label={b.status==="pending_payment"?"awaiting payment":b.status} color={b.status==="accepted"?"approved":b.status==="rejected"||b.status==="cancelled"?"rejected":"pending"}/>
+                      <Bdg label={b.status} color={b.status==="accepted"?"approved":b.status==="rejected"?"rejected":"pending"}/>
                     </div>
                   </div>
-                  {(b.depositPaid||b.balancePaid)&&(
-                    <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${BORDER}`,fontSize:12}}>
-                      <div style={{display:"flex",justifyContent:"space-between",color:MUTED,marginBottom:3}}><span>Deposit</span><span style={{color:b.depositPaid?GREEN:MUTED}}>{b.depositPaid?`✓ Paid ₹${b.depositAmount}`:"Not paid"}</span></div>
-                      <div style={{display:"flex",justifyContent:"space-between",color:MUTED,marginBottom:3}}><span>Balance</span><span style={{color:b.balancePaid?GREEN:MUTED}}>{b.balancePaid?`✓ Paid ₹${b.price-(b.depositAmount||0)}`:"Not paid"}</span></div>
-                      {b.balancePaid&&(
-                        <>
-                          <div style={{display:"flex",justifyContent:"space-between",color:MUTED,marginBottom:3}}><span>Platform commission (10%)</span><span style={{color:G}}>₹{b.platformCommission}</span></div>
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:6}}>
-                            <span style={{color:TXT,fontWeight:600}}>Owed to artist: ₹{b.artistPayout}</span>
-                            {b.payoutStatus==="paid"?<Bdg label="Payout sent" color="approved"/>:<Btn small variant="success" onClick={()=>markPaidOut(b.id)}>Mark as Paid</Btn>}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
                 </div>
               ))}
           </div>
